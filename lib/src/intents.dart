@@ -176,4 +176,3 @@ String intentLabel(String name, IntentKind kind) => switch (kind) {
 /// Notification text with the intent label first, then the message.
 String labelled(String? label, String text) =>
     label == null || label.isEmpty ? text : (text.trim().isEmpty ? label : '$label · ${text.trim()}');
-
