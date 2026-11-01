@@ -60,6 +60,13 @@ object CallRegistry {
     )
 
     fun answer(id: String) { get(id)?.answer(VideoProfile.STATE_AUDIO_ONLY) }
+    fun hold(id: String) { get(id)?.hold() }
+    fun unhold(id: String) { get(id)?.unhold() }
+
+    /** A call other than [except] that the assistant is talking on right now. */
+    fun liveAiCall(except: String): String? = calls.entries.firstOrNull { (id, call) ->
+        id != except && aiCalls.contains(id) && call.details?.state == Call.STATE_ACTIVE
+    }?.key
 
     fun reject(id: String) { get(id)?.reject(false, null) }
     fun hangup(id: String) {

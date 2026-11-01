@@ -128,6 +128,7 @@ class CallAudioConfig {
     this.maxCallSeconds = 300,
     this.speakerCaptureSource = 'voice_communication',
     this.speakerPlaybackUsage = 'media',
+    this.micMute = 'auto',
   });
 
   /// Calls always run through the shell call-audio helper (caller audio from
@@ -140,6 +141,12 @@ class CallAudioConfig {
   final String speakerCaptureSource;
   final String speakerPlaybackUsage;
 
+  /// How the phone's microphone is kept out of assistant calls: 'always'
+  /// muted, 'while_silent' (open only while the assistant's speech or hold
+  /// music plays, for phones whose mute also silences that audio), or 'auto'
+  /// (while_silent on Samsung, always elsewhere).
+  final String micMute;
+
   factory CallAudioConfig.fromJson(Json json) {
     final d = CallAudioConfig();
     return CallAudioConfig(
@@ -149,6 +156,7 @@ class CallAudioConfig {
       maxCallSeconds: (json['max_call_seconds'] as num?)?.toInt() ?? d.maxCallSeconds,
       speakerCaptureSource: (json['speaker_capture_source'] ?? d.speakerCaptureSource).toString(),
       speakerPlaybackUsage: (json['speaker_playback_usage'] ?? d.speakerPlaybackUsage).toString(),
+      micMute: (json['mic_mute'] ?? d.micMute).toString(),
     );
   }
 
@@ -159,6 +167,7 @@ class CallAudioConfig {
         'max_call_seconds': maxCallSeconds,
         'speaker_capture_source': speakerCaptureSource,
         'speaker_playback_usage': speakerPlaybackUsage,
+        'mic_mute': micMute,
       };
 }
 

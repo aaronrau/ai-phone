@@ -13,6 +13,7 @@ List<String> setupIssues(ReceptionistRuntime runtime) {
     if (status['dialerRole'] != true) 'make it the default phone app',
     if (status['callAudioHelper'] != true) 'start the call audio helper',
     if (status['batteryExempt'] != true) 'allow it to run in the background',
+    if (status['overlayAllowed'] == false) 'allow full speed during calls',
     if (runtime.modelState == 'failed') 'reload the models',
   ];
 }
@@ -81,6 +82,15 @@ class SetupPage extends StatelessWidget {
                     detail: 'Keeps the assistant ready while the app is closed.',
                     action: 'Allow',
                     onPressed: () => runtime.api.call('requestBatteryExemption'),
+                  ),
+                  _SetupRow(
+                    label: 'Full speed during calls',
+                    done: status['overlayAllowed'] != false,
+                    detail: 'Some phones slow down apps with nothing on screen, so the assistant '
+                        'pauses mid-sentence. "Display over other apps" lets it keep an invisible '
+                        'one-pixel window during its calls.',
+                    action: 'Allow',
+                    onPressed: () => runtime.api.call('requestOverlay'),
                   ),
                 ],
               ),

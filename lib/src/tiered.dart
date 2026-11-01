@@ -26,14 +26,16 @@ class WorkflowPhrases {
     'transfer_context': "I'll see if {owner} can pick up. What's it about?",
     'transfer_context_again': 'So I can let {owner} know, what is the call regarding?',
     'transfer_hold': 'One moment, let me see if {owner} can pick up.',
+    'transfer_still': 'Still trying {owner}. Thanks for holding.',
     'transfer_connected': "Here's {owner} now.",
     'transfer_declined': "{owner} can't come to the phone right now. Would you like to leave a message?",
   });
 
-  String render(String key, Map<String, String> values) => fillTemplate(this.values[key] ?? defaults.values[key] ?? '', values)
-      .replaceAll(RegExp(r',\s*\.'), '.')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+  String render(String key, Map<String, String> values) => sentenceCase(
+      fillTemplate(this.values[key] ?? defaults.values[key] ?? '', values)
+          .replaceAll(RegExp(r',\s*\.'), '.')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim());
 
   /// Accepts authored lines that pass [acceptablePhrase]; others keep the default.
   static WorkflowPhrases fromJson(Map<String, dynamic> json) => WorkflowPhrases({
@@ -87,7 +89,7 @@ bool acceptablePhrase(String key, String line) {
     'clarify_who' => question && lower.contains('who'),
     'clarify_more' => question,
     'transfer_context' || 'transfer_context_again' => line.contains('{owner}') && question,
-    'transfer_hold' => line.contains('{owner}') && !question,
+    'transfer_hold' || 'transfer_still' => line.contains('{owner}') && !question,
     'transfer_connected' => line.contains('{owner}') && !question,
     'transfer_declined' => line.contains('{owner}') && lower.contains('message') && question,
     _ => false,
@@ -219,6 +221,9 @@ class TieredResponder implements TurnResponder {
 
   /// Said to the caller just before the owner takes the call.
   String get transferConnected => phrases.render('transfer_connected', _values);
+
+  /// Said while the caller waits for the owner, so the line never goes dead.
+  String get transferStill => phrases.render('transfer_still', _values);
 
   /// The owner could not pick up: carry on and take a message.
   FastTurn transferDeclined() {
@@ -563,3 +568,8 @@ bool shouldHangUpAsSpam(String label, double probability, String text, {bool top
   final cues = countSpamCues(text) + (topicSpam ? 1 : 0);
   return (label == 'spam' && cues >= 1) || cues >= 2;
 }
+
+/// Capitalises each sentence's first letter: a value such as the default
+/// owner name "the owner" can open a sentence.
+String sentenceCase(String text) => text.replaceAllMapped(
+    RegExp(r'(^|[.!?]\s+)([a-z])'), (m) => '${m[1]}${m[2]!.toUpperCase()}');

@@ -21,6 +21,43 @@ object CallNotifications {
     private const val TRANSFER_CHANNEL = "transfers"
     const val ID = 2001
 
+    /** Title and text of each assistant call's notification, by call id. */
+    private val aiNotes = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
+
+    /** Call whose warm-transfer alert is showing; kept until the app replaces it. */
+    @Volatile private var transferFor: String? = null
+
+    /** Updates an assistant call's notification text (shown when no owner call needs the slot). */
+    fun setAi(context: Context, callId: String, title: String, text: String) {
+        aiNotes[callId] = title to text
+        if (transferFor == callId) transferFor = null
+        refresh(context)
+    }
+
+    /**
+     * There is one call notification; with several calls it shows the one that
+     * needs the owner most: a ringing call (Answer / Decline, also as call
+     * waiting), then the owner's active, dialing and held calls, then a call the
+     * assistant is handling.
+     */
+    fun refresh(context: Context) {
+        val live = CallRegistry.all().filterValues { it.details?.state != Call.STATE_DISCONNECTED }
+        aiNotes.keys.retainAll(live.keys)
+        if (live.isEmpty()) { transferFor = null; cancel(context); return }
+        fun rank(call: Call) = when (call.details?.state) {
+            Call.STATE_RINGING -> 0
+            Call.STATE_ACTIVE -> 1
+            Call.STATE_HOLDING -> 3
+            else -> 2
+        }
+        val owner = live.entries.filter { !CallRegistry.isAi(it.key, it.value) }.minByOrNull { rank(it.value) }
+        if (owner != null) { show(context, owner.key, owner.value); return }
+        if (transferFor != null && live.containsKey(transferFor)) return
+        val (id, call) = live.entries.first()
+        val (title, text) = aiNotes[id] ?: ("AI assistant is answering" to CallRegistry.number(call).ifBlank { "Unknown caller" })
+        showAi(context, id, title, text)
+    }
+
     /**
      * The owner's own calls, as a notification instead of a full-screen app:
      * ringing calls get Answer / Decline (full screen only on the lock screen,
@@ -62,7 +99,9 @@ object CallNotifications {
                 .setWhen(if (active) connected else System.currentTimeMillis())
                 .setUsesChronometer(active)
                 .setShowWhen(active)
-                .addAction(Notification.Action.Builder(null,
+                .addAction(if (state == Call.STATE_HOLDING)
+                    Notification.Action.Builder(null, "Resume", action(context, CallActionReceiver.RESUME, callId, 25)).build()
+                else Notification.Action.Builder(null,
                     if (CallRegistry.isSpeaker()) "Speaker off" else "Speaker",
                     action(context, CallActionReceiver.SPEAKER, callId, 23)).build())
                 .addAction(Notification.Action.Builder(null, "Hang up",
@@ -85,6 +124,7 @@ object CallNotifications {
      * owner. Alerts and opens the app full screen with Pick up / Not now.
      */
     fun showTransfer(context: Context, callId: String, title: String, text: String) {
+        transferFor = callId
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(TRANSFER_CHANNEL, "Calls for you to pick up", NotificationManager.IMPORTANCE_HIGH))
@@ -107,7 +147,8 @@ object CallNotifications {
             .addAction(Notification.Action.Builder(null, "Not now",
                 action(context, CallActionReceiver.NOT_NOW, callId, 32)).build())
             .build()
-        manager.notify(ID, notification)
+        // Through the service, which re-posts its held call notification on later starts.
+        ReceptionistService.showCall(context, notification)
     }
 
     /** Quiet ongoing notification for a call the AI is handling (no pop-up). */
@@ -130,7 +171,8 @@ object CallNotifications {
             .addAction(Notification.Action.Builder(null, "Take over", action(CallActionReceiver.TAKE_OVER, 11)).build())
             .addAction(Notification.Action.Builder(null, "Hang up", action(CallActionReceiver.HANG_UP, 12)).build())
             .build()
-        manager.notify(ID, notification)
+        // Through the service, which re-posts its held call notification on later starts.
+        ReceptionistService.showCall(context, notification)
     }
 
     fun cancel(context: Context) {

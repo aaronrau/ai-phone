@@ -401,8 +401,23 @@ class ShellContext private constructor(base: Context) : ContextWrapper(base) {
             val thread = constructor.newInstance()
             threadClass.getDeclaredField("sCurrentActivityThread").apply { isAccessible = true }.set(null, thread)
             threadClass.getDeclaredField("mSystemThread").apply { isAccessible = true }.setBoolean(thread, true)
+            fillConfigurationController(threadClass, thread)
             val system = threadClass.getDeclaredMethod("getSystemContext").invoke(thread) as Context
             return ShellContext(system)
+        }
+
+        /** Some builds (e.g. Samsung on Android 16) read the configuration while
+         *  creating the system context; a bare ActivityThread has no controller. */
+        private fun fillConfigurationController(threadClass: Class<*>, thread: Any) {
+            runCatching {
+                val field = threadClass.getDeclaredField("mConfigurationController").apply { isAccessible = true }
+                if (field.get(thread) != null) return
+                val controllerClass = Class.forName("android.app.ConfigurationController")
+                val internal = Class.forName("android.app.ActivityThreadInternal")
+                val controller = controllerClass.getDeclaredConstructor(internal)
+                    .apply { isAccessible = true }.newInstance(thread)
+                field.set(thread, controller)
+            }.onFailure { System.err.println("[ShellCallAudio] no configuration controller: ${it.message}") }
         }
     }
 

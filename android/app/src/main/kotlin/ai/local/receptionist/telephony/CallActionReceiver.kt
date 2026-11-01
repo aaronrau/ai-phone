@@ -15,13 +15,22 @@ class CallActionReceiver : BroadcastReceiver() {
         const val SPEAKER = "ai.local.receptionist.SPEAKER"
         const val PICK_UP = "ai.local.receptionist.PICK_UP"
         const val NOT_NOW = "ai.local.receptionist.NOT_NOW"
+        const val RESUME = "ai.local.receptionist.RESUME"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         val callId = intent.getStringExtra("callId") ?: return
         when (intent.action) {
             // Handled here so the buttons work even before the app's engine starts.
-            ANSWER -> CallRegistry.answer(callId)
+            ANSWER -> if (CallRegistry.liveAiCall(except = callId) != null) {
+                // The assistant is talking on another call: the app holds that
+                // call and stops the assistant before this one connects.
+                EngineHolder.ensure(context)
+                EngineHolder.bridge.emit(mapOf("type" to "call_action", "action" to "answer", "callId" to callId))
+            } else {
+                CallRegistry.answer(callId)
+            }
+            RESUME -> CallRegistry.unhold(callId)
             DECLINE -> CallRegistry.reject(callId)
             HANG_UP -> CallRegistry.hangup(callId)
             SPEAKER -> CallRegistry.setSpeaker(!CallRegistry.isSpeaker())

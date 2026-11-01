@@ -53,7 +53,20 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
     @Volatile var audibleUntil = 0L
         private set
 
+    /** Hold music fills every pause in speech while this is set (a caller on hold). */
+    @Volatile var holdMusic = false
+        set(value) {
+            if (value && !field) music.fadeIn()
+            field = value
+        }
+    private val music = HoldMusic(PocketTts.SAMPLE_RATE)
+    /** Wall-clock time the music written so far runs until. */
+    @Volatile private var musicUntil = 0L
+
     private val worker = Thread({ loop() }, "speech-output").apply { isDaemon = true; start() }
+
+    /** Speech or hold music is audible now, or queued to be within the lead time. */
+    val sounding: Boolean get() = SystemClock.elapsedRealtime().let { it < audibleUntil || it < musicUntil }
 
     val active: Boolean get() = rendering || queue.isNotEmpty() || SystemClock.elapsedRealtime() < audibleUntil
 
@@ -69,6 +82,8 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
         track?.let { runCatching { it.pause(); it.flush() } }
         written = 0
         audibleUntil = SystemClock.elapsedRealtime()
+        musicUntil = 0
+        music.fadeIn()
     }
 
     private fun ensureTrack(): AudioTrack {
@@ -98,7 +113,11 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
 
     private fun loop() {
         while (true) {
-            val item = queue.take()
+            val item = queue.poll(if (holdMusic) 20L else 250L, TimeUnit.MILLISECONDS)
+            if (item == null) {
+                if (holdMusic) runCatching { playMusic() }.onFailure { Log.w("SpeechOutput", "hold music failed", it) }
+                continue
+            }
             if (item.generation != generation.get()) continue
             val engine = tts
             if (engine == null) {
@@ -159,11 +178,14 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
      *  progress is estimated from the audio duration sent. */
     private fun renderToBridge(engine: PocketTts, item: Item, sink: (ByteArray) -> Boolean, start: Long) {
         var firstFrame = -1L
+        var audioSamples = 0L
         val finished = engine.render(item.text, item.voice) { frame ->
             if (item.generation != generation.get()) return@render
+            audioSamples += frame.size / 2
             val now = SystemClock.elapsedRealtime()
             if (firstFrame < 0) firstFrame = now - start
-            if (now > audibleUntil) { bridgeClockStart = now; bridgeSamples = 0 }
+            // Speech starts after anything already queued: earlier speech or hold music.
+            if (now > audibleUntil) { bridgeClockStart = maxOf(now, musicUntil); bridgeSamples = 0 }
             sink(applyGain(frame))
             bridgeSamples += frame.size / 2
             audibleUntil = bridgeClockStart + bridgeSamples * 1000 / PocketTts.SAMPLE_RATE + 250
@@ -172,9 +194,37 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
             emit(mapOf("type" to "tts_done", "id" to item.id, "cancelled" to true))
             return
         }
+        val renderMs = SystemClock.elapsedRealtime() - start
         while (item.generation == generation.get() && SystemClock.elapsedRealtime() < audibleUntil - 100) Thread.sleep(15)
-        Log.d("SpeechOutput", "spoke(bridge) id=${item.id} firstFrameMs=$firstFrame totalMs=${SystemClock.elapsedRealtime() - start}")
+        Log.d("SpeechOutput", "spoke(bridge) id=${item.id} firstFrameMs=$firstFrame renderMs=$renderMs " +
+            "audioMs=${audioSamples * 1000 / PocketTts.SAMPLE_RATE} totalMs=${SystemClock.elapsedRealtime() - start}")
         emit(mapOf("type" to "tts_done", "id" to item.id, "cancelled" to false, "firstFrameMs" to firstFrame))
+    }
+
+    /** Keeps about 300 ms of hold music queued; speech always goes first. */
+    private fun playMusic() {
+        val now = SystemClock.elapsedRealtime()
+        // A short breath after each sentence before the music comes back.
+        if (now < audibleUntil + 600) {
+            music.fadeIn()
+            return
+        }
+        if (musicUntil < now) musicUntil = now
+        if (musicUntil - now > 300) return
+        val chunk = applyGain(music.next(PocketTts.SAMPLE_RATE / 10))
+        val sink = bridgeSink
+        if (sink != null) {
+            sink(chunk)
+        } else {
+            val audio = ensureTrack()
+            if (audio.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                written = audio.playbackHeadPosition.toLong() and 0xffffffffL
+                audio.play()
+            }
+            audio.write(chunk, 0, chunk.size)
+            written += chunk.size / 2
+        }
+        musicUntil += 100
     }
 
     private fun applyGain(frame: ByteArray): ByteArray {

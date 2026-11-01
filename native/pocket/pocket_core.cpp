@@ -98,6 +98,16 @@ PocketEngine::~PocketEngine() = default;
 
 void PocketEngine::render(const std::string& text, const std::string& voice,
                           const PocketFrameSink& sink) {
+  // Affinity and priority are per thread: the constructor only tuned the
+  // thread that loaded the model, while rendering runs on the app's speech
+  // worker. Untuned, that worker ran on efficiency cores at default priority
+  // and rendered at ~0.4x real time on a mid-range phone.
+  static thread_local bool tuned = false;
+  if (!tuned) {
+    preferFastCores();
+    preferAudioPriority();
+    tuned = true;
+  }
   throwIfCancelled();
   check(!text.empty() && text.size() <= 1600, "Pocket text exceeds local limit");
   model_->set_voice(voice);

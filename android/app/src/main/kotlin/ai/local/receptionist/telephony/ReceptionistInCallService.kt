@@ -33,19 +33,15 @@ class ReceptionistInCallService : InCallService() {
             override fun onStateChanged(call: Call, state: Int) {
                 Log.i("ReceptionistCall", "call $id state=${CallRegistry.stateName(state)}")
                 EngineHolder.bridge.emit(CallRegistry.describe(id, call) + ("type" to "call_state"))
-                if (state == Call.STATE_DISCONNECTED) CallNotifications.cancel(this@ReceptionistInCallService)
-                else if (!CallRegistry.isAi(id, call)) CallNotifications.show(this@ReceptionistInCallService, id, call)
+                // With several calls, show whichever needs the owner most.
+                CallNotifications.refresh(this@ReceptionistInCallService)
             }
         }
         callbacks[call] = callback
         call.registerCallback(callback)
         EngineHolder.bridge.emit(CallRegistry.describe(id, call) + ("type" to "call_added"))
-        if (CallRegistry.isAi(id, call)) {
-            CallRegistry.markAiCall(id)
-            CallNotifications.showAi(this, id, "AI assistant is answering", CallRegistry.number(call).ifBlank { "Unknown caller" })
-        } else {
-            CallNotifications.show(this, id, call)
-        }
+        if (CallRegistry.isAi(id, call)) CallRegistry.markAiCall(id)
+        CallNotifications.refresh(this)
         // Calls are shown as notifications; the app's call screen opens only
         // when the notification is tapped or the call was placed from the app.
     }
@@ -55,22 +51,15 @@ class ReceptionistInCallService : InCallService() {
         callbacks.remove(call)?.let { call.unregisterCallback(it) }
         CallRegistry.remove(call)
         if (id != null) EngineHolder.bridge.emit(mapOf("type" to "call_removed", "callId" to id))
-        if (CallRegistry.all().isEmpty()) {
-            CallNotifications.cancel(this)
-            ReceptionistService.leaveCallMode(this)
-        }
+        CallNotifications.refresh(this)
+        if (CallRegistry.all().isEmpty()) ReceptionistService.leaveCallMode(this)
     }
 
     override fun onCallEndpointChanged(callEndpoint: CallEndpoint) {
         CallRegistry.currentEndpoint = callEndpoint
         Log.i("ReceptionistCall", "endpoint changed type=${callEndpoint.endpointType}")
         // Keep the Speaker button label in step with the audio route.
-        for ((id, call) in CallRegistry.all()) {
-            val state = call.details?.state
-            if (!CallRegistry.isAi(id, call) && state != Call.STATE_DISCONNECTED && state != Call.STATE_RINGING) {
-                CallNotifications.show(this, id, call)
-            }
-        }
+        CallNotifications.refresh(this)
         EngineHolder.bridge.emit(mapOf("type" to "call_audio", "speaker" to (callEndpoint.endpointType == CallEndpoint.TYPE_SPEAKER),
             "endpoint" to callEndpoint.endpointType))
     }

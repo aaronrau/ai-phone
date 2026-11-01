@@ -76,6 +76,17 @@ SCENARIOS = {
                   'Speak in short sentences and wait for answers.',
         'maxDurationSeconds': 180,
     },
+    # Warm transfer: asks for the owner with a clear reason, then waits on hold
+    # (hold music and updates) until the assistant takes a message.
+    'transfer': {
+        'firstMessage': '',
+        'system': 'You are Jordan, calling your sibling. An assistant will answer. Wait for the greeting. '
+                  'Say you would like to talk to them about the dinner plans tonight. If you are asked to hold, '
+                  'say "Sure" once and then stay completely silent while you wait, even when you hear music or '
+                  'updates. When the assistant says they cannot come to the phone, leave a short message: dinner '
+                  'moved to seven. Then say goodbye. Speak in short sentences.',
+        'maxDurationSeconds': 150,
+    },
     'spam': {
         'firstMessage': '',
         'system': 'You are a telemarketer calling about a car\'s extended warranty. Wait for the greeting, then '
@@ -131,6 +142,8 @@ def main() -> None:
     target.add_argument('--to', help='E.164 number of the phone under test')
     target.add_argument('--to-file', type=Path, help='private file containing that number')
     parser.add_argument('--output', type=Path, required=True, help='directory for the report (outside the repo)')
+    parser.add_argument('--save-recording', action='store_true',
+                        help='also download the call recording to <output>/recording.wav')
     args = parser.parse_args()
 
     number = args.to or args.to_file.expanduser().read_text().strip()
@@ -193,6 +206,11 @@ def main() -> None:
         'recording_url_present': bool(artifact.get('recordingUrl') or call.get('recordingUrl')),
     }
     (args.output / 'report.json').write_text(json.dumps(report, indent=2))
+    recording = artifact.get('recordingUrl') or call.get('recordingUrl')
+    if args.save_recording and recording:
+        with urllib.request.urlopen(urllib.request.Request(
+                recording, headers={'User-Agent': 'android-ai-receptionist-test/1.0'}), timeout=60) as response:
+            (args.output / 'recording.wav').write_bytes(response.read())
     print(f'ended_reason={report["ended_reason"]}')
     print(report['transcript'] or '(no transcript)')
 

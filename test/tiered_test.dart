@@ -14,6 +14,12 @@ import 'package:android_ai_receptionist/src/tools.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('phrases capitalise a sentence that opens with the owner name', () {
+    expect(sentenceCase("the owner isn't available today. the owner will call back."),
+        "The owner isn't available today. The owner will call back.");
+    expect(sentenceCase('Still trying the owner. Thanks for holding.'), 'Still trying the owner. Thanks for holding.');
+  });
+
   _topics();
   _messageMakesContact();
   _warmTransfer();

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'agent.dart';
@@ -7,18 +8,34 @@ import 'tools.dart';
 
 /// Thin wrapper over the Android bridge (see NativeBridge.kt).
 class NativeApi {
-  NativeApi._();
+  NativeApi._() : _handler = null, _testEvents = null;
   static final NativeApi instance = NativeApi._();
+
+  /// A stand-in for the Android side (tests): [handler] answers method calls
+  /// and [events] replaces the native event stream.
+  @visibleForTesting
+  NativeApi.fake({required Future<Object?> Function(String method, Map<String, dynamic> args) handler,
+      required Stream<Map<String, dynamic>> events})
+      // Named parameters cannot be private, so these are assigned here.
+      // ignore: prefer_initializing_formals
+      : _handler = handler,
+        // ignore: prefer_initializing_formals
+        _testEvents = events;
+
+  final Future<Object?> Function(String method, Map<String, dynamic> args)? _handler;
+  final Stream<Map<String, dynamic>>? _testEvents;
 
   static const _methods = MethodChannel('receptionist/native');
   static const _events = EventChannel('receptionist/events');
 
-  late final Stream<Map<String, dynamic>> events = _events
-      .receiveBroadcastStream()
-      .map((e) => (e as Map).cast<String, dynamic>())
-      .asBroadcastStream();
+  late final Stream<Map<String, dynamic>> events = _testEvents ??
+      _events.receiveBroadcastStream().map((e) => (e as Map).cast<String, dynamic>()).asBroadcastStream();
 
-  Future<T?> call<T>(String method, [Map<String, dynamic>? args]) => _methods.invokeMethod<T>(method, args);
+  Future<T?> call<T>(String method, [Map<String, dynamic>? args]) async {
+    final handler = _handler;
+    if (handler != null) return await handler(method, args ?? const {}) as T?;
+    return _methods.invokeMethod<T>(method, args);
+  }
 
   Future<Map<String, dynamic>> status() async =>
       ((await call<Map>('status')) ?? const {}).cast<String, dynamic>();
@@ -29,6 +46,9 @@ class NativeApi {
       call('speak', {'id': id, 'text': text, 'voice': voice});
 
   Future<void> stopSpeaking() => call('stopSpeaking');
+
+  /// Hold music in every pause between sentences (a caller waiting on hold).
+  Future<void> holdMusic(bool on) => call('holdMusic', {'on': on});
 
   Future<void> setPlayback({String? usage, double? gain}) =>
       call('setPlayback', {'usage': usage, 'gain': gain});

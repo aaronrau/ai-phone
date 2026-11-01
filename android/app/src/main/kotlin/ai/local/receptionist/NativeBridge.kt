@@ -62,6 +62,8 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
     @Volatile private var input: SpeechInput? = null
     val output = SpeechOutput { emit(it) }
     val callAudio = CallAudioBridge { emit(it) }
+    /** Keeps the phone microphone out of assistant calls (see MicGate). */
+    private val micGate = ai.local.receptionist.telephony.MicGate({ output.sounding }, { output.bridgeSink != null })
     @Volatile private var listeningToBridge = false
 
     init {
@@ -148,6 +150,7 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
             "smsRole" to roleHeld(RoleManager.ROLE_SMS),
             "batteryExempt" to context.getSystemService(PowerManager::class.java)
                 .isIgnoringBatteryOptimizations(context.packageName),
+            "overlayAllowed" to Settings.canDrawOverlays(context),
             "permissions" to permissions.associateWith { granted(it) },
             "listening" to (input?.listening == true),
             "callAudioHelper" to callAudio.connected,
@@ -280,6 +283,35 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                     if (output.bridgeSink != null) callAudio.flushPlayback()
                     result.success(null)
                 }
+                "ttsBench" -> {
+                    // Debug: render without playing, on a fresh thread like the speech worker.
+                    val engine = output.tts ?: return result.error("NOT_READY", "Speech model not loaded", null)
+                    val text = call.argument<String>("text")!!
+                    val voice = call.argument<String>("voice") ?: "british_female"
+                    Thread {
+                        val start = android.os.SystemClock.elapsedRealtime()
+                        var first = -1L
+                        var samples = 0L
+                        val outcome = runCatching {
+                            engine.render(text, voice) { frame ->
+                                if (first < 0) first = android.os.SystemClock.elapsedRealtime() - start
+                                samples += frame.size / 2
+                            }
+                        }
+                        val map = mapOf("renderMs" to (android.os.SystemClock.elapsedRealtime() - start),
+                            "firstFrameMs" to first, "audioMs" to samples * 1000 / PocketTts.SAMPLE_RATE,
+                            "error" to outcome.exceptionOrNull()?.message)
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { result.success(map) }
+                    }.start()
+                }
+                "helperCommand" -> {
+                    callAudio.command(call.argument<String>("command")!!)
+                    result.success(null)
+                }
+                "holdMusic" -> {
+                    output.holdMusic = call.argument<Boolean>("on") == true
+                    result.success(null)
+                }
                 "setPlayback" -> {
                     val usage = call.argument<String>("usage")
                     if (usage == "call_bridge") {
@@ -313,10 +345,15 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                     null
                 }
                 "callAnswer" -> { CallRegistry.answer(call.argument<String>("callId")!!); result.success(null) }
+                "callHold" -> { CallRegistry.hold(call.argument<String>("callId")!!); result.success(null) }
+                "callUnhold" -> { CallRegistry.unhold(call.argument<String>("callId")!!); result.success(null) }
                 "callReject" -> { CallRegistry.reject(call.argument<String>("callId")!!); result.success(null) }
                 "callHangup" -> { CallRegistry.hangup(call.argument<String>("callId")!!); result.success(null) }
                 "callSpeaker" -> { CallRegistry.setSpeaker(call.argument<Boolean>("on") == true); result.success(null) }
-                "callMute" -> { CallRegistry.setMuted(call.argument<Boolean>("on") == true); result.success(null) }
+                "callMute" -> {
+                    micGate.want(call.argument<Boolean>("on") == true, call.argument<String>("mode"))
+                    result.success(null)
+                }
                 "callDtmf" -> {
                     CallRegistry.dtmf(call.argument<String>("callId")!!, call.argument<String>("digit")!!.first())
                     result.success(null)
@@ -342,8 +379,16 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                     }.onFailure { Log.w("NativeBridge", "call volume change failed: ${it.message}") }
                     result.success(null)
                 }
-                "enterCallMode" -> { ReceptionistService.enterCallMode(context); result.success(null) }
-                "leaveCallMode" -> { ReceptionistService.leaveCallMode(context); result.success(null) }
+                "enterCallMode" -> {
+                    ReceptionistService.enterCallMode(context)
+                    ai.local.receptionist.telephony.CallCpuWindow.show(context)
+                    result.success(null)
+                }
+                "leaveCallMode" -> {
+                    ReceptionistService.leaveCallMode(context)
+                    ai.local.receptionist.telephony.CallCpuWindow.hide(context)
+                    result.success(null)
+                }
                 "markAiNumber" -> {
                     CallRegistry.markAiNumber(call.argument<String>("number") ?: "")
                     result.success(null)
@@ -351,7 +396,7 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                 "aiCallNotification" -> {
                     val id = call.argument<String>("callId") ?: ""
                     CallRegistry.markAiCall(id)
-                    CallNotifications.showAi(context, id, call.argument<String>("title") ?: "AI assistant is answering",
+                    CallNotifications.setAi(context, id, call.argument<String>("title") ?: "AI assistant is answering",
                         call.argument<String>("text") ?: "")
                     result.success(null)
                 }
@@ -363,7 +408,8 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                 "callNotification" -> {
                     // After "Take over": the call becomes the owner's, shown as a normal call notification.
                     val id = call.argument<String>("callId") ?: ""
-                    CallRegistry.get(id)?.let { CallRegistry.unmarkAi(id, it); CallNotifications.show(context, id, it) }
+                    CallRegistry.get(id)?.let { CallRegistry.unmarkAi(id, it) }
+                    CallNotifications.refresh(context)
                     result.success(null)
                 }
                 "placeCall" -> {
@@ -452,6 +498,11 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                 "requestPermissions" -> {
                     val host = activity ?: return result.error("NO_UI", "Open the app first", null)
                     host.requestPermissions(permissions.filter { !granted(it) }.toTypedArray(), 42)
+                    result.success(null)
+                }
+                "requestOverlay" -> {
+                    (activity ?: context).startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     result.success(null)
                 }
                 "requestBatteryExemption" -> {

@@ -84,16 +84,49 @@ class VoiceSession extends ChangeNotifier {
   /// Ends a call nobody is talking on: the caller went quiet or hung up badly.
   Timer? _idle;
 
+  /// Asked "Are you still there?" since the caller last spoke.
+  bool _checkedIn = false;
+
   void _armIdle() {
     _idle?.cancel();
     if (!isCall || finished || _closing) return;
-    _idle = Timer(Duration(seconds: outbound ? 30 : 15), () {
+    // Inbound: check in after a short silence (the caller may be waiting on
+    // us, e.g. after speech we could not make out), then end the call.
+    final checkIn = !outbound && !_checkedIn;
+    _idle = Timer(Duration(seconds: outbound ? 30 : (checkIn ? 8 : 10)), () {
       if (finished || _closing || _generating || _transferring || _speaking.isNotEmpty) return;
       if (tiered?.waiting == true) return _armIdle(); // on hold: keep waiting
+      if (checkIn) {
+        _checkedIn = true;
+        _say('Are you still there?'); // re-arms when spoken
+        return;
+      }
       unawaited(_finishWith(outbound
           ? "I'll have ${config.ownerName} follow up. Goodbye."
           : 'Thanks for calling. Goodbye.'));
     });
+  }
+
+  /// Text of each sentence still being spoken, by speech id.
+  final Map<String, String> _speechText = {};
+
+  /// What a barge-in cut off. Spoken again if the "interruption" was noise or
+  /// a backchannel ("okay", "mm-hmm"), so neither side waits on the other.
+  String? _interrupted;
+  Timer? _resumeTimer;
+
+  /// "Sorry, I didn't catch that" replies so far (bounded: line noise).
+  int _notCaught = 0;
+
+  /// Hold updates while the owner decides on a warm transfer.
+  Timer? _holdTimer;
+
+  /// Running for 5 s after each hold update, so updates never pile up.
+  Timer? _holdSpacing;
+
+  void _say(String line) {
+    _add('assistant', line);
+    _speak(line);
   }
   Completer<void>? _drained;
 
@@ -149,6 +182,7 @@ class VoiceSession extends ChangeNotifier {
     if (clean.isEmpty) return;
     final id = '$sessionId-${++_speechCounter}';
     _speaking.add(id);
+    _speechText[id] = clean;
     _spokeThisStep = true;
     state = 'speaking';
     notifyListeners();
@@ -180,16 +214,27 @@ class VoiceSession extends ChangeNotifier {
           agent.model.cancel();
         }
       case 'speech_discarded':
+        if (finished) return;
         if (_heldInput != null && !_generating) {
           final held = _heldInput!;
           _heldInput = null;
           unawaited(_run(held));
+        } else if (_interrupted != null) {
+          _resumeInterrupted('noise');
+        } else if (((event['audioMs'] as num?) ?? 0) >= 1200 && _notCaught < 2 && _canReply) {
+          // The caller said something we could not make out: say so instead of
+          // leaving them waiting for an answer.
+          _notCaught++;
+          _say("Sorry, I didn't catch that. Could you say it again?");
+        } else if (_speaking.isEmpty && !_generating) {
+          _armIdle();
         }
       case 'level':
         levelDb = (event['peakDb'] as num?)?.toDouble();
         notifyListeners();
       case 'tts_done' || 'tts_error':
         final id = event['id'];
+        _speechText.remove(id);
         if (_speaking.remove(id)) {
           if (type == 'tts_error') _add('system', 'Speech failed: ${event['message']}');
           if (_speaking.isEmpty) {
@@ -209,6 +254,13 @@ class VoiceSession extends ChangeNotifier {
   void _bargeIn() {
     if (kDebugMode) unawaited(api.log('voice $sessionId barge-in'));
     unawaited(api.stopSpeaking());
+    final cut = [for (final id in _speaking) _speechText.remove(id) ?? ''].join(' ').trim();
+    if (cut.isNotEmpty && !_transferring) {
+      _interrupted = _interrupted == null ? cut : '$_interrupted $cut';
+      // If nothing comes of the interruption, finish what was being said.
+      _resumeTimer?.cancel();
+      _resumeTimer = Timer(const Duration(seconds: 6), () => _resumeInterrupted('timeout'));
+    }
     _speaking.clear();
     _drained?.complete();
     _drained = null;
@@ -216,12 +268,45 @@ class VoiceSession extends ChangeNotifier {
     _setState('listening');
   }
 
+  /// Nothing is being said or prepared, so a reply would not talk over one.
+  bool get _canReply => !finished && !_closing && !_generating && !_transferring && _speaking.isEmpty;
+
+  void _resumeInterrupted(String why) {
+    _resumeTimer?.cancel();
+    final text = _interrupted;
+    _interrupted = null;
+    if (text == null || !_canReply) return;
+    if (kDebugMode) unawaited(api.log('voice $sessionId resume after $why'));
+    _speak(text);
+  }
+
+  /// While waiting for the owner, keep the caller company: never a dead line.
+  void _holdLine() {
+    final responder = tiered;
+    if (responder is! TieredResponder || finished || _closing || _speaking.isNotEmpty) return;
+    if (_holdSpacing?.isActive == true) return;
+    _holdSpacing = Timer(const Duration(seconds: 5), () {});
+    _say(responder.transferStill);
+  }
+
   void _onUtterance(String text) {
     // Once the closing line is playing, nothing the other side says changes it.
     if (finished || _closing || text.trim().isEmpty) return;
     _idle?.cancel();
+    _checkedIn = false;
+    _resumeTimer?.cancel();
+    final interrupted = _interrupted;
+    _interrupted = null;
     if (_transferring) {
       _add(isCall ? 'caller' : 'you', text);
+      _holdLine();
+      return;
+    }
+    if (interrupted != null && !_generating && _backchannel.hasMatch(text.trim())) {
+      // "Okay" / "mm-hmm" over our sentence: not a new turn; finish the sentence.
+      _add(isCall ? 'caller' : 'you', text);
+      _interrupted = interrupted;
+      _resumeInterrupted('backchannel');
       return;
     }
     _add(isCall ? 'caller' : 'you', text);
@@ -342,10 +427,21 @@ class VoiceSession extends ChangeNotifier {
     _transferring = true;
     _idle?.cancel();
     await _waitForSpeech();
+    _holdSpacing = Timer(const Duration(seconds: 5), () {});
+    // Music between the hold updates: the caller always hears that the line is alive.
+    unawaited(_music(true));
+    _holdTimer = Timer.periodic(const Duration(seconds: 12), (_) => _holdLine());
     // The owner sees everything the caller has said, not just the last line.
     final context = responder.callerContext;
-    final picked = await onTransfer!(context.isEmpty ? callerSaid : context);
-    _transferring = false;
+    final bool picked;
+    try {
+      picked = await onTransfer!(context.isEmpty ? callerSaid : context);
+    } finally {
+      _holdTimer?.cancel();
+      _holdSpacing?.cancel();
+      _transferring = false;
+      await _music(false);
+    }
     if (finished) return;
     if (picked) {
       _closing = true;
@@ -357,6 +453,18 @@ class VoiceSession extends ChangeNotifier {
       return;
     }
     await _applyFast(responder.transferDeclined(), '');
+  }
+
+  bool _musicOn = false;
+
+  Future<void> _music(bool on) async {
+    if (_musicOn == on) return;
+    _musicOn = on;
+    try {
+      await api.holdMusic(on);
+    } catch (e) {
+      if (kDebugMode) unawaited(api.log('voice $sessionId hold music failed: $e'));
+    }
   }
 
   Future<void> _waitForSpeech() async {
@@ -394,7 +502,11 @@ class VoiceSession extends ChangeNotifier {
     _limit?.cancel();
     _silence?.cancel();
     _idle?.cancel();
+    _resumeTimer?.cancel();
+    _holdTimer?.cancel();
+    _holdSpacing?.cancel();
     if (_generating) agent.model.cancel();
+    if (_musicOn) await _music(false);
     if (silenceNow) await api.stopSpeaking();
     await api.listenStop();
     // listenStop returns after any final words were delivered; let them land.
@@ -406,6 +518,11 @@ class VoiceSession extends ChangeNotifier {
     onEnded(this);
   }
 }
+
+/// Short acknowledgements that are not a turn of their own.
+final _backchannel = RegExp(
+    r"^((ok(ay)?|mm+[- ]?hmm+|m+hm+|uh[- ]?huh|hmm+|um+|uh+|ah+|oh|right|i see|got it|all ?right)[.!,]*\s*)+$",
+    caseSensitive: false);
 
 /// Puts an owner's note into the greeting: a statement goes before the closing
 /// "How can I help?"; a question replaces it, so the caller answers it first.

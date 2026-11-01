@@ -38,6 +38,10 @@ class CallInfo {
   /// Conversation runs through the shell call-audio helper.
   bool bridged = false;
 
+  /// Rang while the line was busy: the assistant answers it if it is still
+  /// ringing once the line is free.
+  bool waiting = false;
+
   /// Set when the assistant placed this call for the owner.
   OutboundTask? outbound;
   bool speaker = false;
@@ -248,7 +252,11 @@ class ReceptionistRuntime extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadModels() async {
+  /// Loads the models once, however many callers ask at the same time.
+  Future<void> loadModels() => _loading ??= _loadModels().whenComplete(() => _loading = null);
+  Future<void>? _loading;
+
+  Future<void> _loadModels() async {
     modelError = null;
     modelState = 'loading';
     notifyListeners();
@@ -460,6 +468,10 @@ class ReceptionistRuntime extends ChangeNotifier {
 
   // ---------------------------------------------------------------- events
 
+  /// Feeds a native event to the runtime (tests).
+  @visibleForTesting
+  void handleEvent(Map<String, dynamic> event) => _onEvent(event);
+
   void _onEvent(Map<String, dynamic> event) {
     switch (event['type']) {
       case 'screen_call':
@@ -501,7 +513,9 @@ class ReceptionistRuntime extends ChangeNotifier {
         notifyListeners();
       case 'call_action':
         final id = (event['callId'] ?? '').toString();
-        if (event['action'] == 'pick_up') {
+        if (event['action'] == 'answer') {
+          unawaited(answerCall(id));
+        } else if (event['action'] == 'pick_up') {
           acceptTransfer();
         } else if (event['action'] == 'not_now') {
           declineTransfer();
@@ -540,8 +554,9 @@ class ReceptionistRuntime extends ChangeNotifier {
       decision = switch (disposition.workflow) {
         Workflow.block => 'reject',
         // Without the call-audio helper the assistant cannot hear the caller,
-        // so allowed calls ring normally instead of being silenced.
-        _ => !canConverse || config.callAudio.answerAfterSeconds > 0 ? 'allow' : 'silence',
+        // so allowed calls ring normally instead of being silenced. A call
+        // that arrives while another is up rings as call waiting.
+        _ => !canConverse || config.callAudio.answerAfterSeconds > 0 || _lineBusy() ? 'allow' : 'silence',
       };
       if (number.trim().isNotEmpty) {
         await updateContact(number, (c) {
@@ -602,13 +617,76 @@ class ReceptionistRuntime extends ChangeNotifier {
           'The call-audio helper is not running, so the call rang through. Start it with tool/start_call_audio_helper.sh.');
       return;
     }
+    // One conversation at a time: answering now would put the call in
+    // progress (the owner's or the assistant's) on hold. Let this one ring
+    // as call waiting; the assistant takes it if the line frees up in time.
+    if (_lineBusy(except: id)) {
+      info.waiting = true;
+      await store?.addActivity('call_waiting', {'number': number});
+      debugLog('call $id waiting: line busy');
+      notifyListeners();
+      return;
+    }
     info.aiHandled = true;
+    // Answer only once the assistant can speak, so the caller hears ringing
+    // rather than a silent line while models load.
+    if (!_modelsUsable) await loadModels();
     final delay = config.callAudio.answerAfterSeconds;
-    if (delay > 0) {
-      await Future<void>.delayed(Duration(seconds: delay));
-      if (calls[id]?.state != 'ringing' || !info.aiHandled) return;
+    if (delay > 0) await Future<void>.delayed(Duration(seconds: delay));
+    if (calls[id]?.state != 'ringing' || !info.aiHandled) return;
+    await api.call('callAnswer', {'callId': id});
+  }
+
+  /// Another call is connected, on hold, being placed, or about to be
+  /// answered by the assistant.
+  bool _lineBusy({String? except}) => calls.values.any((c) =>
+      c.callId != except &&
+      c.state != 'disconnected' &&
+      (c.state != 'ringing' || (c.aiHandled && !c.aiStarted)));
+
+  /// The line freed up: the assistant answers a call that rang meanwhile.
+  Future<void> _answerWaiting() async {
+    final next = calls.values.where((c) => c.waiting && c.incoming && c.state == 'ringing').firstOrNull;
+    if (next == null || _lineBusy(except: next.callId) || !config.enabled) return;
+    next
+      ..waiting = false
+      ..aiHandled = true;
+    debugLog('answering waiting call ${next.callId}');
+    if (!_modelsUsable) await loadModels();
+    if (calls[next.callId]?.state != 'ringing' || !next.aiHandled) return;
+    await api.call('callAnswer', {'callId': next.callId});
+  }
+
+  /// The owner answers a ringing call. A call the assistant is talking on is
+  /// put on hold first and becomes the owner's, so the assistant never hears
+  /// or speaks on the call the owner picked up.
+  Future<void> answerCall(String id) async {
+    final info = calls[id];
+    if (info != null) {
+      info
+        ..aiHandled = false
+        ..waiting = false;
+    }
+    for (final other in calls.values.where((c) => c.callId != id && c.aiHandled && c.aiStarted).toList()) {
+      await api.stopSpeaking();
+      await api.call('callHold', {'callId': other.callId});
+      await _giveHeldCallToOwner(other);
     }
     await api.call('callAnswer', {'callId': id});
+  }
+
+  /// An assistant call went on hold (the owner answered another call): the
+  /// assistant stops, and the held call is the owner's to resume or end.
+  Future<void> _giveHeldCallToOwner(CallInfo info) async {
+    final current = session;
+    if (current != null && current.callId == info.callId) {
+      await current.stop(silenceNow: true).timeout(const Duration(seconds: 3), onTimeout: () {});
+    }
+    await takeOver(info.callId);
+    await api.call('callNotification', {'callId': info.callId});
+    final who = info.disposition?.name ?? (info.number.isEmpty ? 'A caller' : info.number);
+    await api.notifyOwner('$who is on hold', 'They were talking with your assistant. Resume or hang up from the call.');
+    await store?.addActivity('call_held', {'number': info.number});
   }
 
   Future<void> _onCallState(Map<String, dynamic> event) async {
@@ -621,6 +699,8 @@ class ReceptionistRuntime extends ChangeNotifier {
     if (info.state == 'active' && info.aiHandled && !info.aiStarted) {
       info.aiStarted = true;
       await _startAiCall(info);
+    } else if (info.state == 'holding' && info.aiHandled && info.aiStarted) {
+      await _giveHeldCallToOwner(info);
     } else if (info.state == 'disconnected') {
       await _onCallRemoved(id);
     }
@@ -652,9 +732,11 @@ class ReceptionistRuntime extends ChangeNotifier {
     if (bridge) {
       // Digital path: caller audio from the downlink, speech into the uplink.
       // The phone stays silent: no speakerphone, microphone muted so the room
-      // never reaches the caller, and in-call volume at its minimum.
+      // never reaches the caller (on phones whose mute also silences played
+      // audio, open only while the assistant's audio plays), and in-call
+      // volume at its minimum.
       await api.call('callSpeaker', {'on': false});
-      await api.call('callMute', {'on': true});
+      await api.call('callMute', {'on': true, 'mode': config.callAudio.micMute});
       await api.call('callQuiet', {'on': true});
     }
     await Future<void>.delayed(const Duration(milliseconds: 700));
@@ -698,6 +780,7 @@ class ReceptionistRuntime extends ChangeNotifier {
     }
     await refreshStatus();
     if (status['callAudioHelper'] != true) return 'The call-audio helper is not running.';
+    if (_lineBusy()) return 'Another call is in progress.';
     _pendingCallOuts[normalizeNumber(task.number)] = task;
     callOuts.insert(0, task);
     await api.call('markAiNumber', {'number': task.number});
@@ -770,6 +853,15 @@ class ReceptionistRuntime extends ChangeNotifier {
       unawaited(Future<void>.delayed(const Duration(seconds: 4), () async {
         if (calls.isEmpty) await api.call('callQuiet', {'on': false});
       }));
+    } else {
+      if (focusCallId == id) focusCallId = null;
+      if (info != null && info.aiHandled && !calls.values.any((c) => c.aiHandled && c.aiStarted)) {
+        // The assistant's call ended while another is up: that one is the
+        // owner's, so they must hear and be heard.
+        await api.call('callMute', {'on': false});
+        await api.call('callQuiet', {'on': false});
+      }
+      await _answerWaiting();
     }
     if (info != null) {
       final connected = info.connectedAt;
@@ -813,6 +905,29 @@ class ReceptionistRuntime extends ChangeNotifier {
         debugLog('calendar saved items=${calendar.items.length}');
       case 'hold_next':
         holdNextCall = true;
+      case 'say':
+        // Debug: speak a fixed test phrase into the current call.
+        await api.speak('debug-${DateTime.now().millisecondsSinceEpoch}', (event['text'] ?? '').toString(), config.voice);
+      case 'call_mute':
+        await api.call('callMute', {'on': event['on'] == 'true'});
+        debugLog('call_mute ${event['on']}');
+      case 'helper':
+        // Debug: a raw call-audio helper command, e.g. "playback_usage call_assistant_tx".
+        await api.call('helperCommand', {'command': (event['text'] ?? '').toString()});
+        debugLog('helper ${event['text']}');
+      case 'tts_bench':
+        // Debug: render speech without playing it and report the speed.
+        for (var i = 0; i < 3; i++) {
+          final r = await api.call<Map>('ttsBench', {
+            'text': (event['text'] ?? 'Thanks for calling. I can take a message, or see if they can pick up.').toString(),
+            'voice': config.voice,
+          });
+          debugLog('tts_bench $r');
+        }
+      case 'hold_music':
+        // Debug: hold music in the pauses of the current call's speech.
+        await api.holdMusic(event['on'] == 'true');
+        debugLog('hold_music ${event['on']}');
       case 'eval_decision':
         await _evalDecision(event);
       case 'author_phrases':
@@ -1050,7 +1165,8 @@ class ReceptionistRuntime extends ChangeNotifier {
     created.addListener(notifyListeners);
     session = created;
     notifyListeners();
-    await _withModel(() async {});
+    // Never wait on the model queue here: a text reply waiting for this call
+    // to end would hold it, and the caller would hear nothing at all.
     await created.start();
     // The greeting delivered the owner's messages.
     for (final t in tells) {
@@ -1154,11 +1270,12 @@ class ReceptionistRuntime extends ChangeNotifier {
       return simulate ? '(no reply: ${disposition.reason})' : null;
     }
     if (!modelsReady) await loadModels();
+    // A live call owns the model; texts wait until it ends. Wait outside the
+    // model queue, so a call starting meanwhile is never blocked by this text.
+    while (session != null || _lineBusy()) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
     return _withModel(() async {
-      // A live call owns the model; texts wait until it ends.
-      while (session != null) {
-        await Future<void>.delayed(const Duration(seconds: 2));
-      }
       final threads = await store?.threads() ?? <String, SmsThread>{};
       final key = '${simulate ? 'test:' : ''}${normalizeNumber(number)}';
       final now = DateTime.now();

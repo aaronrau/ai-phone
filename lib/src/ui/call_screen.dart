@@ -52,10 +52,7 @@ class CallScreen extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: FilledButton(
-                        onPressed: () {
-                          info.aiHandled = false;
-                          _call('callAnswer');
-                        },
+                        onPressed: () => runtime.answerCall(callId),
                         child: const Text('Answer'),
                       ),
                     ),
@@ -84,6 +81,10 @@ class CallScreen extends StatelessWidget {
                 if (session != null) ...[
                   const SizedBox(height: 8),
                   OutlinedButton(onPressed: () => runtime.takeOver(callId), child: const Text('Take over call')),
+                ],
+                if (info.state == 'holding') ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton(onPressed: () => _call('callUnhold'), child: const Text('Resume call')),
                 ],
                 const SizedBox(height: 8),
                 FilledButton(

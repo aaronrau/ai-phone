@@ -29,13 +29,22 @@ INTERNET permission, and there is no server or cloud inference.
 | Assistant off, or call-audio helper not running | The call rings through to you as a notification with **Answer** / **Decline**. |
 
 While the assistant handles a call **nothing plays through the phone**: no
-ringing, speakerphone off, the phone's microphone muted, and the call-audio
-helper sets the audio policy's in-call volume to 0 on the earpiece, speaker
+ringing, speakerphone off, the phone's microphone muted (on phones where a
+muted call also silences the assistant, such as Samsung, it opens only while
+the assistant's speech or hold music is playing; set `call_audio.mic_mute` to
+`always`, `while_silent` or `auto`), and the call-audio helper sets the audio policy's in-call volume to 0 on the earpiece, speaker
 and headsets (restored a few seconds after the call, so the end-of-call tone
 is silent too). Only a quiet "AI assistant is answering" notification shows,
 with **Take over** and **Hang up**. The assistant hangs up itself after a
-goodbye, after spam, or when the line goes quiet (15 s on calls it answers, 30 s
-on calls it places, never while on hold). Results such as a message left for
+goodbye, after spam, or when the line goes quiet (on calls it answers it asks
+"Are you still there?" after 8 s and says goodbye 10 s later; 30 s on calls it
+places; never while on hold).
+
+The line is never left dead: if the caller talks over the assistant and it was
+only noise or "okay" / "mm-hmm", the assistant finishes its sentence; speech it
+could not make out gets "Sorry, I didn't catch that"; and a caller waiting for
+a warm transfer hears soft hold music, generated on the phone, with "Still
+trying {owner}. Thanks for holding." every 12 s. Results such as a message left for
 you arrive as **silent** notifications and on Home; only urgent alerts sound.
 A caller who leaves a message becomes a contact: **known** if they are in your
 phone's address book, otherwise named and **screened**.
@@ -51,6 +60,16 @@ opens full screen with who is calling and everything they said, plus
 is taken. Pick up gives you the call with sound and your
 microphone back; Not now, or no answer within `transfer_wait_seconds` (25 s),
 and the assistant says you can't come to the phone and takes a message.
+
+**Two calls at once.** The assistant holds one conversation at a time and never
+answers over a call in progress (yours or its own), since answering would put
+that call on hold. A second call rings as call waiting with **Answer** /
+**Decline**; if it is still ringing when the line frees up, the assistant
+answers it. If you answer it while the assistant is talking to someone, the
+assistant stops, that caller is put on hold and becomes yours ("… is on hold"
+notification; **Resume** or **Hang up** from the call). The call notification
+always shows the call that needs you most: a ringing call first, then your
+active, dialing and held calls, then the assistant's.
 
 Your own calls are notifications too: ringing calls get Android's call-style
 **Answer** / **Decline**, calls in progress show a timer with **Speaker** and
@@ -398,6 +417,14 @@ tool/start_call_audio_helper.sh <android-serial>
 Without it, calls ring through to you. Shizuku or root could start the helper
 without a computer; that is not implemented.
 
+Some phones (seen on Samsung) confine an app with nothing on screen to a few
+efficiency cores, where speech renders at under half real time and callers
+hear long gaps. During its calls the assistant therefore keeps an invisible,
+untouchable 1×1 overlay window, which moves it to the full-CPU foreground
+group; this needs **Display over other apps** (Setup → Full speed during
+calls, or `adb shell appops set ai.local.receptionist SYSTEM_ALERT_WINDOW
+allow`).
+
 ## Decision model
 
 By default (`"responder": "small_model"`) every call and text turn is decided
@@ -449,8 +476,8 @@ tool/start_call_audio_helper.sh <android-serial>
 `--audio` points at a folder with `vad/silero_vad.onnx` and `pocket/`. Models
 stream into app-private storage through `run-as`, so provisioning needs the
 debug build. Then open **Settings → Setup and permissions**: permissions,
-default phone app, default messaging app, call screening, the call-audio helper
-and background operation.
+default phone app, default messaging app, call screening, the call-audio helper,
+background operation and full speed during calls.
 
 Phones with aggressive battery managers may also need:
 
