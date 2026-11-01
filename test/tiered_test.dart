@@ -329,6 +329,15 @@ void _warmTransfer() {
 }
 
 void _messageMakesContact() {
+  test('a confident spam topic counts as one red flag, never as enough alone', () {
+    const pitch = 'Hi, I am calling about a new plan for your home.';
+    expect(countSpamCues(pitch), 0);
+    expect(shouldHangUpAsSpam('other', 0.9, pitch), isFalse);
+    expect(shouldHangUpAsSpam('other', 0.9, pitch, topicSpam: true), isFalse, reason: 'one signal is not enough');
+    expect(shouldHangUpAsSpam('spam', 0.9, pitch), isFalse);
+    expect(shouldHangUpAsSpam('spam', 0.9, pitch, topicSpam: true), isTrue);
+  });
+
   test('a spam hang-up is recorded as spam, whatever topic the words matched', () async {
     final (r, _) = _responder('+15555550123', {'warranty': ('spam', '{}')});
     r.intents = IntentDetector(intents: IntentDef.defaults, embed: _bagOfWords, threshold: 0.3);

@@ -999,6 +999,13 @@ class ReceptionistRuntime extends ChangeNotifier {
           'lines': [for (final line in ended.lines) line.toJson()],
         }));
         if (session == ended) session = null;
+        if (callId != null && agent.endedAsSpam) {
+          // Silent note of the blocked spam call, labelled like every other.
+          final said = ended.lines.where((l) => l.speaker == 'caller').map((l) => l.text).join(' ');
+          final who = agent.disposition.number.isEmpty ? 'an unknown number' : agent.disposition.number;
+          unawaited(api.notifyOwner('Blocked a spam call from $who',
+              labelled(responder?.topic?.label ?? 'Spam', said.length > 140 ? '${said.substring(0, 140)}…' : said)));
+        }
         if (callId != null) {
           final heard = ended.lines.where((l) => l.speaker == 'caller').length;
           unawaited(updateContact(agent.disposition.number,

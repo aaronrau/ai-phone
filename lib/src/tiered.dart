@@ -456,7 +456,9 @@ class TieredResponder implements TurnResponder {
         (result.probability < 0.95 || !_farewell.hasMatch(callerSaid))) {
       return _fallback(callerSaid, started);
     }
-    final spam = _tools.contains('mark_spam') && shouldHangUpAsSpam(result.label, result.probability, callerSaid);
+    final spam = _tools.contains('mark_spam') &&
+        shouldHangUpAsSpam(result.label, result.probability, callerSaid,
+            topicSpam: _turnMatch?.intent.kind == IntentKind.spam);
     if (spam) {
       await agent.executor.run('mark_spam', {'reason': 'spam call'});
       // Record the call as spam (the topic too, whatever words matched).
@@ -553,7 +555,10 @@ int countSpamCues(String text) => _spamCue.allMatches(text).length;
 
 /// The receptionist hangs up only on spam, and never on the small model's
 /// confidence alone: the caller's own words must contain a red flag.
-bool shouldHangUpAsSpam(String label, double probability, String text) {
-  final cues = countSpamCues(text);
+/// Hang up only on clear spam: the model says spam and there is at least one
+/// red flag, or there are two red flags. A confident match to a spam topic
+/// ([topicSpam], from the on-device embeddings) counts as one red flag.
+bool shouldHangUpAsSpam(String label, double probability, String text, {bool topicSpam = false}) {
+  final cues = countSpamCues(text) + (topicSpam ? 1 : 0);
   return (label == 'spam' && cues >= 1) || cues >= 2;
 }
