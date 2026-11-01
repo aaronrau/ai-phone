@@ -865,6 +865,11 @@ class ReceptionistRuntime extends ChangeNotifier {
         final ranked = await intentDetector?.rank((event['text'] ?? '').toString()) ?? const <IntentMatch>[];
         debugLog('intent ms=${watch.elapsedMilliseconds} '
             '${ranked.take(3).map((m) => '${m.intent.name}=${m.score.toStringAsFixed(3)}').join(' ')}');
+      case 'unblock':
+        // Debug: unblock a number (system block list and contact book).
+        final contact = contacts.find(number);
+        if (contact != null) await setContactStatus(contact, ContactStatus.unknown);
+        debugLog('unblock found=${contact != null} status=${contact?.status.name}');
       case 'enable':
         await setEnabled(event['value'] != 'false');
         debugLog('enabled=${config.enabled}');
