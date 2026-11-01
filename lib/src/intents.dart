@@ -81,11 +81,37 @@ class IntentDef {
           'about something',
           'just a quick question',
           'nothing important',
+          'it is about your account',
+          'I am returning a call',
+          'I got a missed call from this number',
+          'this is your phone company',
         ]),
         IntentDef(name: 'Sales', kind: IntentKind.spam, examples: [
           'we have a special offer for you',
           'your car warranty is about to expire',
           'lower the interest rate on your credit card',
+        ]),
+        IntentDef(name: 'Scam', kind: IntentKind.spam, examples: [
+          'the tax office says you owe back taxes and penalties',
+          'your social security number has been suspended',
+          'this is the fraud department of your bank, verify your account',
+          'your computer has a virus, we are calling from tech support',
+          'congratulations, you have won a free vacation',
+          'your electricity will be shut off today unless you pay',
+          'you qualify for student loan forgiveness',
+          'please read me the code we just sent to your phone',
+          'there is a warrant for your arrest',
+          'your amazon account had a suspicious order',
+          'you qualify for a free product at no cost to you',
+          'press one now before this offer expires',
+          'a package in your name was seized by customs',
+          'you missed jury duty and must pay a fine',
+          'invest in our crypto trading program with guaranteed returns',
+          'we recovered your lost money, there is just a small fee',
+          'take a short survey and win a free cruise',
+          'grandma I am in jail and need bail money, please do not tell anyone',
+          'you are hired, we just need your bank details and a fee for equipment',
+          'sorry wrong number, you sound nice, do you invest at all',
         ]),
         IntentDef(name: 'Money request', kind: IntentKind.spam, examples: [
           'you need to pay right now',
@@ -138,10 +164,17 @@ class IntentDetector {
     }
   }
 
-  /// The closest intent above [threshold], or null.
+  /// Extra similarity a spam match needs, since a false spam flag costs more.
+  static const spamMargin = 0.05;
+
+  /// The closest intent above [threshold] (spam: above [threshold] plus
+  /// [spamMargin]), or null.
   Future<IntentMatch?> detect(String text) async {
     final best = await rank(text);
-    return best.isNotEmpty && best.first.score >= threshold ? best.first : null;
+    if (best.isEmpty) return null;
+    final top = best.first;
+    final bar = top.intent.kind == IntentKind.spam ? threshold + spamMargin : threshold;
+    return top.score >= bar ? top : null;
   }
 
   /// Every intent with its best example similarity, highest first.

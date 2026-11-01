@@ -148,6 +148,8 @@ Future<Map<String, dynamic>> runContextEval({
   required PromptFormat format,
   required File dataset,
   required String modelName,
+  /// Optional on-device topic detection; a spam-topic match is one red flag.
+  Future<bool> Function(String text)? isSpamTopic,
 }) async {
   final router = DecisionRouter(backend, format, style: DecisionStyle.context);
   final rows = [
@@ -168,7 +170,8 @@ Future<Map<String, dynamic>> runContextEval({
     final gold = row['label'] as String;
     if (result.label == gold) correct++;
     // Same hang-up rule as the live receptionist.
-    final hangsUp = shouldHangUpAsSpam(result.label, result.probability, row['caller'] as String);
+    final hangsUp = shouldHangUpAsSpam(result.label, result.probability, row['caller'] as String,
+        topicSpam: isSpamTopic != null && await isSpamTopic(row['caller'] as String));
     if (gold == 'spam') {
       spamGold++;
       if (hangsUp) spamCaught++;

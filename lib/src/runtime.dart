@@ -826,6 +826,9 @@ class ReceptionistRuntime extends ChangeNotifier {
           format: formatForModel(modelName),
           dataset: File('$files/eval/decision_eval_v2.jsonl'),
           modelName: modelName,
+          isSpamTopic: event['topics'] == 'true' && intentDetector != null
+              ? (text) async => (await intentDetector!.detect(text))?.intent.kind == IntentKind.spam
+              : null,
         );
         await File('$files/eval/result-context-${modelName.replaceAll('.gguf', '')}.json')
             .writeAsString(const JsonEncoder.withIndent('  ').convert(report));
@@ -869,6 +872,36 @@ class ReceptionistRuntime extends ChangeNotifier {
         final ranked = await intentDetector?.rank((event['text'] ?? '').toString()) ?? const <IntentMatch>[];
         debugLog('intent ms=${watch.elapsedMilliseconds} '
             '${ranked.take(3).map((m) => '${m.intent.name}=${m.score.toStringAsFixed(3)}').join(' ')}');
+      case 'intent_eval':
+        // Debug: spam-topic detection over a labelled JSONL set (caller, label).
+        final file = File('${status['filesDir']}/${event['path'] ?? 'eval/decision_eval_v2.jsonl'}');
+        final detector = intentDetector;
+        if (detector == null || !await file.exists()) {
+          debugLog('intent_eval unavailable');
+          break;
+        }
+        var spamLines = 0, spamCaught = 0, otherLines = 0, otherFlagged = 0, reasonOnSpam = 0;
+        final watch = Stopwatch()..start();
+        for (final line in await file.readAsLines()) {
+          if (line.trim().isEmpty) continue;
+          final row = (jsonDecode(line) as Map).cast<String, dynamic>();
+          final match = await detector.detect((row['caller'] ?? '').toString());
+          final isSpam = match?.intent.kind == IntentKind.spam;
+          if (event['verbose'] == 'true' && (row['label'] == 'spam') != isSpam) {
+            debugLog('intent_eval ${row['label'] == 'spam' ? 'MISSED' : 'FLAGGED'} '
+                '${match ?? 'no match'} :: ${row['caller']}');
+          }
+          if (row['label'] == 'spam') {
+            spamLines++;
+            if (isSpam) spamCaught++;
+            if (match?.intent.kind == IntentKind.reason) reasonOnSpam++;
+          } else {
+            otherLines++;
+            if (isSpam) otherFlagged++;
+          }
+        }
+        debugLog('intent_eval spam_caught=$spamCaught/$spamLines spam_seen_as_reason=$reasonOnSpam '
+            'legit_flagged=$otherFlagged/$otherLines ms_per_line=${watch.elapsedMilliseconds ~/ (spamLines + otherLines)}');
       case 'unblock':
         // Debug: unblock a number (system block list and contact book).
         final contact = contacts.find(number);

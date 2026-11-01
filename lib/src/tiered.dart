@@ -456,9 +456,10 @@ class TieredResponder implements TurnResponder {
         (result.probability < 0.95 || !_farewell.hasMatch(callerSaid))) {
       return _fallback(callerSaid, started);
     }
-    final spam = _tools.contains('mark_spam') &&
-        shouldHangUpAsSpam(result.label, result.probability, callerSaid,
-            topicSpam: _turnMatch?.intent.kind == IntentKind.spam);
+    // A spam-topic match is shown to the owner but does not count toward
+    // hanging up: measured on the phone it caught one more scam (39/40) but
+    // hung up on two legitimate callers, against 38/40 and none without it.
+    final spam = _tools.contains('mark_spam') && shouldHangUpAsSpam(result.label, result.probability, callerSaid);
     if (spam) {
       await agent.executor.run('mark_spam', {'reason': 'spam call'});
       // Record the call as spam (the topic too, whatever words matched).
@@ -556,8 +557,8 @@ int countSpamCues(String text) => _spamCue.allMatches(text).length;
 /// The receptionist hangs up only on spam, and never on the small model's
 /// confidence alone: the caller's own words must contain a red flag.
 /// Hang up only on clear spam: the model says spam and there is at least one
-/// red flag, or there are two red flags. A confident match to a spam topic
-/// ([topicSpam], from the on-device embeddings) counts as one red flag.
+/// red flag, or there are two red flags. [topicSpam] (a spam-topic match) is
+/// only used by the evaluation, to measure it as an extra red flag.
 bool shouldHangUpAsSpam(String label, double probability, String text, {bool topicSpam = false}) {
   final cues = countSpamCues(text) + (topicSpam ? 1 : 0);
   return (label == 'spam' && cues >= 1) || cues >= 2;

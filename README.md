@@ -25,7 +25,7 @@ INTERNET permission, and there is no server or cloud inference.
 | On the block list or known spam | Rejected before the phone rings. |
 | Known contact (contact book or phone address book) | The assistant answers: "Hi {name}, you've reached {owner}'s AI Assistant. How can I help?" Once they say what they want it offers a **warm transfer** to you, then answers availability from your calendar and takes messages. |
 | Unknown caller | The assistant answers and asks who is calling and what it is about (up to two follow-ups), then takes a message in the caller's own words. |
-| Scam or sales call | Hung up on only with clear signs: selling something, asking for money or payment, or asking the assistant to do something (press a key, read a code, confirm details). A confident match to a spam topic counts as one sign; it takes two signs (or the model's spam verdict plus one). The number is blocked and a silent "Blocked a spam call" notification shows, e.g. "Spam: Sales · …". Anything else becomes a message. |
+| Scam or sales call | Hung up on only with clear signs: selling something, asking for money or payment, or asking the assistant to do something (press a key, read a code, confirm details). It takes two red flags, or the decision model's spam verdict plus one. The number is blocked and a silent "Blocked a spam call" notification shows, e.g. "Spam: Scam · …". A spam *topic* match alone is only a label ("Spam: Scam · …"), never a hang-up. Anything else becomes a message. |
 | Assistant off, or call-audio helper not running | The call rings through to you as a notification with **Answer** / **Decline**. |
 
 While the assistant handles a call **nothing plays through the phone**: no
@@ -103,6 +103,12 @@ Measured on the phone: "Is he free for lunch on Saturday" → Plans 0.89;
 "Your order is out for delivery today" → Delivery 0.86; "Can you put me through
 to him" → not a reason 0.87; "You qualify for a lower credit card rate" →
 Sales 0.90; "How is the weather over there" → no topic.
+
+**Spam detection, measured on the phone** (106 labelled caller turns):
+decision model + red-flag keywords hang up on 38 of 40 scams and on none of
+the 66 legitimate callers. Adding a spam-topic match as a red flag caught 39 of
+40 but hung up on 2 legitimate callers, so topics only label calls. The topic
+detector alone recognises 22 of 40 scams as spam and wrongly flags 2 of 66.
 
 ### Tasks
 
