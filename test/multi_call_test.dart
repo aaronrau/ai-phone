@@ -7,8 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_native.dart';
 
-/// Two calls at once: the assistant holds one conversation at a time, and a
-/// call that rings meanwhile is never answered over the call in progress.
+/// Two calls at once: the assistant handles call waiting like a receptionist,
+/// and never answers over a call the owner is on.
 void main() {
   late FakeNative native;
   late ReceptionistRuntime runtime;
@@ -39,23 +39,65 @@ void main() {
 
   List<String> answered() => [for (final l in native.log) if (l.startsWith('callAnswer ')) l.split(' ').last];
 
-  test('a second call rings while the assistant talks, and is answered when the line frees', () => onClock((async) {
+  test('call waiting: the assistant holds its caller, answers the new call, then comes back', () => onClock((async) {
         ring(async, 'call-1');
         expect(answered(), ['call-1']);
         state(async, 'call-1', 'active');
-        expect(runtime.session?.callId, 'call-1');
+        final first = runtime.session!;
+        expect(first.callId, 'call-1');
+        native.finishSpeaking(); // the greeting
+        async.elapse(const Duration(seconds: 1));
 
         ring(async, 'call-2', number: '+15555550124');
-        expect(answered(), ['call-1'], reason: 'answering would put the first caller on hold');
-        expect(runtime.calls['call-2']!.waiting, isTrue);
-        expect(runtime.session?.callId, 'call-1', reason: 'the first conversation keeps going');
+        // The first caller hears why before going on hold.
+        expect(native.spoken.last, 'Sorry, another call is coming in. Please hold for a moment.');
+        expect(answered(), ['call-1'], reason: 'not until the first caller has been told');
+        native.finishSpeaking();
+        async.elapse(const Duration(seconds: 1));
+        final log = native.log;
+        expect(log.lastIndexOf('callHold call-1'), lessThan(log.lastIndexOf('callAnswer call-2')));
+        expect(log.lastIndexOf('listenStop'), lessThan(log.lastIndexOf('callAnswer call-2')));
+        expect(answered(), ['call-1', 'call-2']);
+        expect(runtime.heldSession, same(first));
 
+        state(async, 'call-1', 'holding');
+        expect(runtime.calls['call-1']!.aiHandled, isTrue, reason: 'held by the assistant, not given to the owner');
+        state(async, 'call-2', 'active');
+        expect(runtime.session?.callId, 'call-2');
+        expect(native.spoken.last, contains("Sam's"));
+        native.finishSpeaking();
+
+        // The second caller hangs up: back to the first.
+        state(async, 'call-2', 'disconnected');
+        runtime.handleEvent({'type': 'call_removed', 'callId': 'call-2'});
+        async.elapse(const Duration(milliseconds: 100));
+        expect(native.log, contains('callUnhold call-1'));
+        state(async, 'call-1', 'active');
+        async.elapse(const Duration(seconds: 1));
+        expect(runtime.session, same(first));
+        // Back with the question the caller had not answered yet.
+        expect(native.spoken.last, 'Thanks for holding. How can I help?');
+        expect(native.log.where((l) => l == 'callMute false'), isEmpty, reason: 'the room never reaches a caller');
+        state(async, 'call-1', 'disconnected');
+      }));
+
+  test('a caller who hangs up on hold ends quietly, the other call goes on', () => onClock((async) {
+        ring(async, 'call-1');
+        state(async, 'call-1', 'active');
+        native.finishSpeaking();
+        ring(async, 'call-2', number: '+15555550124');
+        native.finishSpeaking();
+        async.elapse(const Duration(seconds: 1));
+        state(async, 'call-1', 'holding');
+        state(async, 'call-2', 'active');
+        final second = runtime.session!;
+        native.calls.clear();
         state(async, 'call-1', 'disconnected');
         runtime.handleEvent({'type': 'call_removed', 'callId': 'call-1'});
         async.elapse(const Duration(seconds: 1));
-        expect(answered(), ['call-1', 'call-2']);
-        state(async, 'call-2', 'active');
-        expect(runtime.session?.callId, 'call-2');
+        expect(runtime.heldSession, isNull);
+        expect(runtime.session, same(second));
+        expect(native.log, isNot(contains('listenStop')), reason: 'the second call keeps listening');
         state(async, 'call-2', 'disconnected');
       }));
 

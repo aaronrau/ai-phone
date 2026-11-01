@@ -61,14 +61,20 @@ is taken. Pick up gives you the call with sound and your
 microphone back; Not now, or no answer within `transfer_wait_seconds` (25 s),
 and the assistant says you can't come to the phone and takes a message.
 
-**Two calls at once.** The assistant holds one conversation at a time and never
-answers over a call in progress (yours or its own), since answering would put
-that call on hold. A second call rings as call waiting with **Answer** /
-**Decline**; if it is still ringing when the line frees up, the assistant
-answers it. If you answer it while the assistant is talking to someone, the
-assistant stops, that caller is put on hold and becomes yours ("… is on hold"
-notification; **Resume** or **Hang up** from the call). The call notification
-always shows the call that needs you most: a ringing call first, then your
+**Two calls at once (call waiting).** When a second call comes in while the
+assistant is talking with someone, it handles it like a receptionist: it
+finishes its sentence, tells the first caller "Sorry, another call is coming
+in. Please hold for a moment.", puts them on hold and answers the new call
+(kept to two minutes while someone waits). When that call ends it takes the
+first caller off hold with "Thanks for holding." plus the question it last
+asked. If the held caller hangs up, the other call simply carries on. A third
+call, a call during a warm transfer, or any call while you are on the phone
+rings for you as call waiting with **Answer** / **Decline**; the assistant
+answers it if it is still ringing once the line frees up. If you answer a
+call while the assistant is talking to someone, the assistant stops, that
+caller is put on hold and becomes yours ("… is on hold" notification;
+**Resume** or **Hang up** from the call). The call notification always shows
+the call that needs you most: a ringing call first, then your
 active, dialing and held calls, then the assistant's.
 
 Your own calls are notifications too: ringing calls get Android's call-style

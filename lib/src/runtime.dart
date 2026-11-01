@@ -42,6 +42,9 @@ class CallInfo {
   /// ringing once the line is free.
   bool waiting = false;
 
+  /// The assistant put this caller on hold to answer another call.
+  bool heldByAssistant = false;
+
   /// Set when the assistant placed this call for the owner.
   OutboundTask? outbound;
   bool speaker = false;
@@ -133,6 +136,9 @@ class ReceptionistRuntime extends ChangeNotifier {
   final Map<String, CallInfo> calls = {};
   final Map<String, Disposition> _screened = {};
   VoiceSession? session;
+
+  /// A conversation on hold while the assistant answers another call.
+  VoiceSession? heldSession;
   String? focusCallId;
   String? dialNumber;
 
@@ -621,6 +627,9 @@ class ReceptionistRuntime extends ChangeNotifier {
     // progress (the owner's or the assistant's) on hold. Let this one ring
     // as call waiting; the assistant takes it if the line frees up in time.
     if (_lineBusy(except: id)) {
+      // Call waiting: the assistant puts its own caller on hold and answers,
+      // like a receptionist; with the owner on the phone it rings for them.
+      if (await _switchTo(info)) return;
       info.waiting = true;
       await store?.addActivity('call_waiting', {'number': number});
       debugLog('call $id waiting: line busy');
@@ -635,6 +644,55 @@ class ReceptionistRuntime extends ChangeNotifier {
     if (delay > 0) await Future<void>.delayed(Duration(seconds: delay));
     if (calls[id]?.state != 'ringing' || !info.aiHandled) return;
     await api.call('callAnswer', {'callId': id});
+  }
+
+  /// Call waiting while the assistant talks with another caller: it tells
+  /// that caller about the new call, holds them, and answers this one. Not
+  /// while the owner is on a call, during a transfer, or with someone already
+  /// on hold. Returns whether it answered.
+  Future<bool> _switchTo(CallInfo info) async {
+    final current = session;
+    final others = calls.values.where((c) => c.callId != info.callId && c.state != 'disconnected').toList();
+    if (current == null || heldSession != null || !current.canPause || others.length != 1) return false;
+    final active = others.single;
+    if (active.callId != current.callId || !active.aiHandled || !active.aiStarted || active.state != 'active') {
+      return false;
+    }
+    info.aiHandled = true;
+    debugLog('call waiting: holding ${active.callId} to answer ${info.callId}');
+    await store?.addActivity('call_waiting', {'number': info.number, 'answered': true});
+    await current.pause();
+    if (calls[info.callId]?.state != 'ringing' || !info.aiHandled || calls[active.callId] == null) {
+      // The new caller gave up (or the owner took it) meanwhile: carry on.
+      info.aiHandled = false;
+      await current.resume();
+      return true;
+    }
+    active.heldByAssistant = true;
+    heldSession = current;
+    session = null;
+    notifyListeners();
+    await api.call('callHold', {'callId': active.callId});
+    await api.call('callAnswer', {'callId': info.callId});
+    return true;
+  }
+
+  /// The other call ended: take the held caller off hold and carry on.
+  Future<void> _resumeHeld() async {
+    final held = heldSession;
+    if (held == null || session != null) return;
+    final info = calls[held.callId];
+    heldSession = null;
+    if (info == null || held.finished) return;
+    info.heldByAssistant = false;
+    await api.call('callUnhold', {'callId': info.callId});
+    for (var i = 0; i < 30 && calls[info.callId]?.state == 'holding'; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (calls[info.callId] == null) return;
+    session = held;
+    notifyListeners();
+    await held.resume();
   }
 
   /// Another call is connected, on hold, being placed, or about to be
@@ -668,6 +726,15 @@ class ReceptionistRuntime extends ChangeNotifier {
         ..waiting = false;
     }
     for (final other in calls.values.where((c) => c.callId != id && c.aiHandled && c.aiStarted).toList()) {
+      if (other.heldByAssistant) {
+        // Already on hold for the assistant: it becomes the owner's too.
+        other.heldByAssistant = false;
+        final held = heldSession;
+        heldSession = null;
+        if (held != null) await held.stop();
+        await _giveHeldCallToOwner(other);
+        continue;
+      }
       await api.stopSpeaking();
       await api.call('callHold', {'callId': other.callId});
       await _giveHeldCallToOwner(other);
@@ -699,7 +766,7 @@ class ReceptionistRuntime extends ChangeNotifier {
     if (info.state == 'active' && info.aiHandled && !info.aiStarted) {
       info.aiStarted = true;
       await _startAiCall(info);
-    } else if (info.state == 'holding' && info.aiHandled && info.aiStarted) {
+    } else if (info.state == 'holding' && info.aiHandled && info.aiStarted && !info.heldByAssistant) {
       await _giveHeldCallToOwner(info);
     } else if (info.state == 'disconnected') {
       await _onCallRemoved(id);
@@ -845,6 +912,12 @@ class ReceptionistRuntime extends ChangeNotifier {
     final info = calls.remove(id);
     final current = session;
     if (current != null && current.callId == id) await current.stop(silenceNow: true);
+    final held = heldSession;
+    if (held != null && held.callId == id) {
+      // The caller on hold hung up.
+      heldSession = null;
+      await held.stop();
+    }
     if (calls.isEmpty) {
       await api.call('leaveCallMode');
       focusCallId = null;
@@ -861,6 +934,7 @@ class ReceptionistRuntime extends ChangeNotifier {
         await api.call('callMute', {'on': false});
         await api.call('callQuiet', {'on': false});
       }
+      await _resumeHeld();
       await _answerWaiting();
     }
     if (info != null) {
@@ -1125,6 +1199,8 @@ class ReceptionistRuntime extends ChangeNotifier {
       bridged: bridged,
       tiered: responder,
       greetingNote: notes.isEmpty ? null : notes.join(' '),
+      // Someone is on hold for this call: keep it short.
+      maxSeconds: heldSession != null ? 120 : null,
       onTransfer: callId == null
           ? null
           : (said) async {

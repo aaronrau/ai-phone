@@ -33,6 +33,7 @@ class VoiceSession extends ChangeNotifier {
     this.onTransfer,
     this.onHandOff,
     this.greetingNote,
+    this.maxSeconds,
   }) : sessionId = 'voice-${DateTime.now().microsecondsSinceEpoch}';
 
   final NativeApi api;
@@ -52,6 +53,10 @@ class VoiceSession extends ChangeNotifier {
 
   /// Added to the greeting: a message from the owner, or a question to ask.
   final String? greetingNote;
+
+  /// Overrides the configured call length limit (e.g. while another caller
+  /// waits on hold).
+  final int? maxSeconds;
 
   /// Warm transfer: asks the owner to pick up; completes with whether they did.
   final Future<bool> Function(String callerSaid)? onTransfer;
@@ -132,7 +137,10 @@ class VoiceSession extends ChangeNotifier {
 
   bool get isCall => agent.channel == Channel.call;
 
+  DateTime? _startedAt;
+
   Future<void> start() async {
+    _startedAt = DateTime.now();
     _events = api.events.listen(_onEvent);
     final audio = config.callAudio;
     await api.setPlayback(
@@ -160,9 +168,68 @@ class VoiceSession extends ChangeNotifier {
       source: bridged ? 'call_bridge' : audio.speakerCaptureSource,
       endSilence: audio.endSilenceSeconds,
     );
-    _limit = Timer(Duration(seconds: audio.maxCallSeconds), () {
-      unawaited(_finishWith("I'm sorry, I have to end the call now. Goodbye."));
+    _armLimit(maxSeconds ?? audio.maxCallSeconds);
+  }
+
+  void _armLimit(int seconds) {
+    _limit?.cancel();
+    _limit = Timer(Duration(seconds: seconds), () {
+      unawaited(_finishWith(maxSeconds != null
+          ? "I'm sorry, I have to get back to another caller. ${config.ownerName} will follow up. Goodbye."
+          : "I'm sorry, I have to end the call now. Goodbye."));
     });
+  }
+
+  /// On hold while the assistant answers another call (call waiting).
+  bool get paused => _paused;
+  bool _paused = false;
+  DateTime? _pausedAt;
+
+  /// A conversation that can step away for another call: not in the middle
+  /// of a transfer or closing, and not a call the assistant placed.
+  bool get canPause => !finished && !_closing && !_transferring && !_paused && !outbound && isCall;
+
+  /// Call waiting: finish the current sentence, tell the caller about the
+  /// other call, then stop listening so the call can go on hold.
+  Future<void> pause() async {
+    if (!canPause) return;
+    _idle?.cancel();
+    _resumeTimer?.cancel();
+    _interrupted = null;
+    if (_generating) agent.model.cancel();
+    await _waitForSpeech(const Duration(seconds: 6));
+    _say('Sorry, another call is coming in. Please hold for a moment.');
+    await _waitForSpeech(const Duration(seconds: 10));
+    _paused = true;
+    _pausedAt = DateTime.now();
+    _limit?.cancel();
+    _idle?.cancel();
+    if (_musicOn) await _music(false);
+    await api.stopSpeaking();
+    _speaking.clear();
+    await api.listenStop();
+    _setState('on hold');
+  }
+
+  /// Back from the other call: thank the caller and repeat our last question,
+  /// so the conversation picks up where it left off.
+  Future<void> resume() async {
+    if (!_paused || finished) return;
+    _paused = false;
+    final audio = config.callAudio;
+    await api.setPlayback(usage: bridged ? 'call_bridge' : audio.speakerPlaybackUsage, gain: audio.gain);
+    await api.listenStart(
+      sessionId,
+      source: bridged ? 'call_bridge' : audio.speakerCaptureSource,
+      endSilence: audio.endSilenceSeconds,
+    );
+    // The time on hold does not count toward the call length limit.
+    final used = _startedAt == null ? 0 : _pausedAt!.difference(_startedAt!).inSeconds;
+    _armLimit(((maxSeconds ?? audio.maxCallSeconds) - used).clamp(30, 1 << 20).toInt());
+    final last = lines.lastWhere((l) => l.speaker == 'assistant' && !l.text.startsWith('Sorry, another call'),
+        orElse: () => TranscriptLine('assistant', ''));
+    final question = RegExp(r'[^.!?]*\?\s*$').firstMatch(last.text)?.group(0)?.trim();
+    _say(question == null || question.isEmpty ? 'Thanks for holding.' : 'Thanks for holding. $question');
   }
 
   void _add(String speaker, String text) {
@@ -193,6 +260,8 @@ class VoiceSession extends ChangeNotifier {
     final type = event['type'];
     final session = event['session'];
     if (session != null && session != sessionId) return;
+    // On hold: the audio and speech events belong to the other call.
+    if (_paused) return;
     switch (type) {
       case 'utterance':
         final text = (event['text'] ?? '').toString();
@@ -467,10 +536,10 @@ class VoiceSession extends ChangeNotifier {
     }
   }
 
-  Future<void> _waitForSpeech() async {
+  Future<void> _waitForSpeech([Duration limit = const Duration(seconds: 30)]) async {
     if (_speaking.isEmpty) return;
     _drained ??= Completer<void>();
-    await _drained!.future.timeout(const Duration(seconds: 30), onTimeout: () {});
+    await _drained!.future.timeout(limit, onTimeout: () {});
   }
 
   /// Set once the call is ending: the closing line is spoken in full even if
@@ -507,11 +576,15 @@ class VoiceSession extends ChangeNotifier {
     _holdSpacing?.cancel();
     if (_generating) agent.model.cancel();
     if (_musicOn) await _music(false);
-    if (silenceNow) await api.stopSpeaking();
-    await api.listenStop();
-    // listenStop returns after any final words were delivered; let them land.
-    await (_late ?? Future.value()).timeout(const Duration(seconds: 5), onTimeout: () {});
-    if (bridged) await api.setPlayback(usage: config.callAudio.speakerPlaybackUsage);
+    // A caller who hung up while on hold: the audio now belongs to the other
+    // call, so leave speech, listening and playback alone.
+    if (!_paused) {
+      if (silenceNow) await api.stopSpeaking();
+      await api.listenStop();
+      // listenStop returns after any final words were delivered; let them land.
+      await (_late ?? Future.value()).timeout(const Duration(seconds: 5), onTimeout: () {});
+      if (bridged) await api.setPlayback(usage: config.callAudio.speakerPlaybackUsage);
+    }
     if (hangUp && callId != null) await api.call('callHangup', {'callId': callId});
     await _events?.cancel();
     _setState('ended');
