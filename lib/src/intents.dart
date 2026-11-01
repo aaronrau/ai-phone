@@ -103,6 +103,10 @@ class IntentMatch {
   /// Cosine similarity of the closest example (0..1 for normalised vectors).
   final double score;
 
+  /// Shown at the start of notifications: "Plans", "Wants to talk (not a
+  /// reason)" or "Spam: Sales".
+  String get label => intentLabel(intent.name, intent.kind);
+
   @override
   String toString() => '${intent.name} (${intent.kind.name}, ${score.toStringAsFixed(2)})';
 }
@@ -161,3 +165,15 @@ class IntentDetector {
     return sum;
   }
 }
+
+/// "Plans", "Wants to talk (not a reason)" or "Spam: Sales".
+String intentLabel(String name, IntentKind kind) => switch (kind) {
+      IntentKind.reason => name,
+      IntentKind.vague => '$name (not a reason)',
+      IntentKind.spam => name == 'Spam' ? 'Spam' : 'Spam: $name',
+    };
+
+/// Notification text with the intent label first, then the message.
+String labelled(String? label, String text) =>
+    label == null || label.isEmpty ? text : (text.trim().isEmpty ? label : '$label · ${text.trim()}');
+

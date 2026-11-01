@@ -219,8 +219,9 @@ class _Host implements ToolHost {
   Future<List<CalendarEvent>> calendar(DateTime start, DateTime end) async => [];
   @override
   Future<(DateTime, DateTime)?> workingHours(DateTime day) async => CalendarData.defaults().hoursFor(day);
+  final notes = <String>[];
   @override
-  Future<void> notifyOwner(String title, String body, {bool urgent = false}) async {}
+  Future<void> notifyOwner(String title, String body, {bool urgent = false}) async => notes.add('$title | $body');
   @override
   Future<void> record(String kind, Map<String, dynamic> data) async => records.add(kind);
   @override
@@ -336,6 +337,15 @@ void _messageMakesContact() {
     expect(turn!.hangUp, isTrue);
     expect(r.agent.endedAsSpam, isTrue);
     expect(r.topic!.intent.kind, IntentKind.spam);
+  });
+
+  test("a message notification starts with the caller's intent", () async {
+    final (r, host) = _responder('+15555550100', {'.': ('other', '{}')});
+    r.intents = IntentDetector(intents: IntentDef.defaults, embed: _bagOfWords, threshold: 0.5);
+    await r.handle('Are we still meeting for coffee tomorrow?');
+    r.awaitingMessage = true;
+    await r.handle('Tell Sam to call me about meeting for coffee tomorrow.');
+    expect(host.notes.last, endsWith('| Plans · Tell Sam to call me about meeting for coffee tomorrow.'));
   });
 
   test('a known caller who leaves a message is saved as a known contact', () async {

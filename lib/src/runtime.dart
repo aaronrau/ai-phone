@@ -210,7 +210,11 @@ class ReceptionistRuntime extends ChangeNotifier {
       final known = (await classify(number, sms: true)).workflow == Workflow.known;
       if (config.enabled && !known && !isVerificationCode(body)) return;
       final name = contact?.label ?? await api.lookupContact(number) ?? number;
-      await api.call('smsNotify', {'threadId': threadId, 'title': name, 'body': body});
+      IntentMatch? match;
+      try {
+        match = await intentDetector?.detect(body);
+      } catch (_) {}
+      await api.call('smsNotify', {'threadId': threadId, 'title': name, 'body': labelled(match?.label, body)});
     } catch (e) {
       debugLog('text notification failed: $e');
     }
@@ -944,14 +948,14 @@ class ReceptionistRuntime extends ChangeNotifier {
       ..topicTransfer = {for (final t in topicTasks) if (t.action == InboundAction.transfer) t.topic}
       ..onTopicAnswer = (topic, question, answer) async {
         await store?.addActivity('task_answer', {'number': agent.disposition.number, 'topic': topic, 'answer': answer});
-        await api.notifyOwner('${agent.disposition.name ?? agent.disposition.number} · $topic', '$question $answer');
+        await api.notifyOwner('${agent.disposition.name ?? agent.disposition.number} answered', labelled(topic, '$question $answer'));
       }
       ..onTopic = (match) {
         // Show what the call is about on the assistant's call notification.
         if (callId != null && calls[callId]?.bridged == true && transfer == null) {
           final who = agent.disposition.name ?? (agent.disposition.number.isEmpty ? 'Unknown caller' : agent.disposition.number);
           unawaited(api.call('aiCallNotification',
-              {'callId': callId, 'title': 'AI assistant is answering', 'text': '$who · ${match.intent.name}'}));
+              {'callId': callId, 'title': 'AI assistant is answering', 'text': labelled(match.label, who)}));
         }
         notifyListeners();
       }
@@ -976,7 +980,8 @@ class ReceptionistRuntime extends ChangeNotifier {
       onTransfer: callId == null
           ? null
           : (said) async {
-              final picked = await _requestTransfer(callId, agent, said, topic: responder?.topic?.intent.name);
+              final picked = await _requestTransfer(callId, agent, said,
+                  topic: responder?.topic?.intent.name, topicLabel: responder?.topic?.label);
               if (transferTask != null) await _finishTask(transferTask, picked ? 'You picked up' : 'You did not pick up');
               return picked;
             },
@@ -1030,7 +1035,7 @@ class ReceptionistRuntime extends ChangeNotifier {
   /// Stops the receptionist on a live call and hands it to the user.
   /// Warm transfer: alert the owner (opening the app full screen) and wait for
   /// Pick up / Not now; no answer counts as not now.
-  Future<bool> _requestTransfer(String callId, Agent agent, String said, {String? topic}) async {
+  Future<bool> _requestTransfer(String callId, Agent agent, String said, {String? topic, String? topicLabel}) async {
     final name = agent.disposition.name ?? (agent.disposition.number.isEmpty ? 'A contact' : agent.disposition.number);
     final request = TransferRequest(callId, name, said, DateTime.now(), config.transferWaitSeconds, topic: topic);
     transfer = request;
@@ -1038,7 +1043,7 @@ class ReceptionistRuntime extends ChangeNotifier {
     _transferAnswer = answer;
     notifyListeners();
     await api.call('transferRequest',
-        {'callId': callId, 'title': '$name is calling${topic == null ? '' : ' · $topic'}', 'body': said});
+        {'callId': callId, 'title': '$name is calling', 'body': labelled(topicLabel, said)});
     final picked = await answer.future
         .timeout(Duration(seconds: config.transferWaitSeconds), onTimeout: () => false);
     if (identical(transfer, request)) transfer = null;

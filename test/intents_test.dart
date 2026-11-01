@@ -40,4 +40,12 @@ void main() {
     expect(back.map((i) => i.name), IntentDef.defaults.map((i) => i.name));
     expect(back.first.examples, IntentDef.defaults.first.examples);
   });
+
+  test('notification text starts with the intent label', () {
+    expect(intentLabel('Plans', IntentKind.reason), 'Plans');
+    expect(intentLabel('Wants to talk', IntentKind.vague), 'Wants to talk (not a reason)');
+    expect(intentLabel('Sales', IntentKind.spam), 'Spam: Sales');
+    expect(labelled('Plans', 'Call me about dinner.'), 'Plans · Call me about dinner.');
+    expect(labelled(null, 'Call me about dinner.'), 'Call me about dinner.');
+  });
 }

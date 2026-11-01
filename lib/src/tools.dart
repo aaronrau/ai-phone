@@ -1,6 +1,7 @@
 import 'config.dart';
 import 'contacts.dart';
 import 'policy.dart';
+import 'intents.dart';
 
 /// A tool the model may call. [followUp] tools return information the model
 /// must relay, so the agent generates again after running them.
@@ -175,8 +176,9 @@ class ToolExecutor {
   String? identifiedReason;
   String? lastMessage;
 
-  /// Topic detected in what the caller said (shown in notifications).
+  /// Topic detected in what the caller said, and its notification label.
   String? topic;
+  String? topicLabel;
 
   String get _callerLabel => identifiedName ?? disposition.name ?? disposition.number;
 
@@ -199,7 +201,8 @@ class ToolExecutor {
           channel: channel,
           workflow: disposition.workflow.name,
         ));
-        await host.notifyOwner('Message from $callerName${topic == null ? '' : ' · $topic'}', message);
+        // The intent label comes first, then the message.
+        await host.notifyOwner('Message from $callerName', labelled(topicLabel, message));
         // Leaving a message makes the caller a contact: named, with what they
         // said, and "screened" (identified, not yet approved) until reviewed.
         await host.updateContact(disposition.number, (c) {

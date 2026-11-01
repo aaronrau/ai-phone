@@ -418,7 +418,9 @@ class TieredResponder implements TurnResponder {
     // A valid reason sticks; otherwise show the latest detected intent.
     if (match != null && (current == null || current.intent.kind != IntentKind.reason || match.intent.kind == IntentKind.reason)) {
       topic = match;
-      agent.executor.topic = match.intent.name;
+      agent.executor
+        ..topic = match.intent.name
+        ..topicLabel = match.label;
       onTopic?.call(match);
     }
   }
@@ -461,7 +463,9 @@ class TieredResponder implements TurnResponder {
       agent.endedAsSpam = true;
       if (topic?.intent.kind != IntentKind.spam) {
         topic = IntentMatch(IntentDef(name: 'Spam', kind: IntentKind.spam, examples: const []), 1);
-        agent.executor.topic = 'Spam';
+        agent.executor
+          ..topic = 'Spam'
+          ..topicLabel = 'Spam';
       }
       return FastTurn(phrases.render('spam', _values), tool: 'mark_spam', args: const {'reason': 'spam call'},
           ends: true, hangUp: true, label: 'spam', ms: _ms(started));
