@@ -457,6 +457,12 @@ class TieredResponder implements TurnResponder {
     final spam = _tools.contains('mark_spam') && shouldHangUpAsSpam(result.label, result.probability, callerSaid);
     if (spam) {
       await agent.executor.run('mark_spam', {'reason': 'spam call'});
+      // Record the call as spam (the topic too, whatever words matched).
+      agent.endedAsSpam = true;
+      if (topic?.intent.kind != IntentKind.spam) {
+        topic = IntentMatch(IntentDef(name: 'Spam', kind: IntentKind.spam, examples: const []), 1);
+        agent.executor.topic = 'Spam';
+      }
       return FastTurn(phrases.render('spam', _values), tool: 'mark_spam', args: const {'reason': 'spam call'},
           ends: true, hangUp: true, label: 'spam', ms: _ms(started));
     }

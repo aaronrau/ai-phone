@@ -328,6 +328,16 @@ void _warmTransfer() {
 }
 
 void _messageMakesContact() {
+  test('a spam hang-up is recorded as spam, whatever topic the words matched', () async {
+    final (r, _) = _responder('+15555550123', {'warranty': ('spam', '{}')});
+    r.intents = IntentDetector(intents: IntentDef.defaults, embed: _bagOfWords, threshold: 0.3);
+    final turn = await r.handle('You have been selected for a free warranty offer, I need a billing contact and '
+        'your credit card to confirm, press one now');
+    expect(turn!.hangUp, isTrue);
+    expect(r.agent.endedAsSpam, isTrue);
+    expect(r.topic!.intent.kind, IntentKind.spam);
+  });
+
   test('a known caller who leaves a message is saved as a known contact', () async {
     final (r, host) = _responder('+15555550100', {});
     r.awaitingMessage = true;
