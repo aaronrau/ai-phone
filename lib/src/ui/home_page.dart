@@ -177,7 +177,7 @@ class _SummaryTile extends StatelessWidget {
               children: [
                 Text(displayName(item.who), style: text.titleMedium),
                 Muted('${item.number.isEmpty ? '' : '${formatPhone(item.number)} · '}${shortTime(item.time)} · '
-                    '${item.category.label}${item.topic.isEmpty ? '' : ' · About: ${item.topic}'}'),
+                    '${item.category.label}${item.topicLabel.isEmpty ? '' : ' · ${item.topicLabel}'}'),
                 const SizedBox(height: 12),
                 if (item.lines.isEmpty) Text(item.detail, style: text.bodyMedium),
                 for (final line in item.lines)

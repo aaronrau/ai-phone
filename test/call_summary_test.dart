@@ -91,4 +91,14 @@ void main() {
     expect(items.map((i) => i.outgoing), [false, true, true, true]);
     expect(items.first.category, CallCategory.other, reason: 'a missed call from an unknown number');
   });
+
+  test('the detected intent is labelled by its kind', () {
+    CallSummary one(Map<String, dynamic> extra) => summarizeActivity(
+        [entry('call_transcript', {'number': '+15555550120', 'workflow': 'known', 'lines': said('hi'), ...extra})],
+        contacts).single;
+    expect(one({'topic': 'Plans', 'topic_kind': 'reason'}).topicLabel, 'About: Plans');
+    expect(one({'topic': 'Wants to talk', 'topic_kind': 'vague'}).topicLabel, 'Intent: Wants to talk (not a reason)');
+    expect(one({'topic': 'Sales', 'topic_kind': 'spam'}).topicLabel, 'Spam: Sales');
+    expect(one({}).topicLabel, '');
+  });
 }

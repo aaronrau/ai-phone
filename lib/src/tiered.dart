@@ -200,7 +200,8 @@ class TieredResponder implements TurnResponder {
   /// On-device topic detection (sentence embeddings); null without the model.
   IntentDetector? intents;
 
-  /// The topic of the call so far (not "vague"), shown to the owner.
+  /// What the call is about, shown to the owner: the first valid reason
+  /// found, otherwise the latest detected intent (vague or spam).
   IntentMatch? topic;
   IntentMatch? _turnMatch;
   void Function(IntentMatch match)? onTopic;
@@ -413,7 +414,9 @@ class TieredResponder implements TurnResponder {
       return;
     }
     final match = _turnMatch;
-    if (match != null && match.intent.kind != IntentKind.vague) {
+    final current = topic;
+    // A valid reason sticks; otherwise show the latest detected intent.
+    if (match != null && (current == null || current.intent.kind != IntentKind.reason || match.intent.kind == IntentKind.reason)) {
       topic = match;
       agent.executor.topic = match.intent.name;
       onTopic?.call(match);

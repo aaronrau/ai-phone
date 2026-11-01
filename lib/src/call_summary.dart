@@ -23,6 +23,7 @@ class CallSummary {
     required this.category,
     required this.detail,
     this.topic = '',
+    this.topicKind = '',
     this.outgoing = false,
     this.lines = const [],
   });
@@ -39,6 +40,17 @@ class CallSummary {
 
   /// What the call was about, as detected on the phone (e.g. "Plans").
   final String topic;
+
+  /// The detected intent's kind: reason, vague or spam ('' for older calls).
+  final String topicKind;
+
+  /// "About: Plans", "Intent: Wants to talk (not a reason)" or "Spam: Sales".
+  String get topicLabel => switch (topicKind) {
+        _ when topic.isEmpty => '',
+        'vague' => 'Intent: $topic (not a reason)',
+        'spam' => 'Spam: $topic',
+        _ => 'About: $topic',
+      };
   final CallCategory category;
   final String detail;
 
@@ -107,6 +119,7 @@ List<CallSummary> summarizeActivity(
           category: category,
           detail: detail,
           topic: (data['topic'] ?? '').toString(),
+          topicKind: (data['topic_kind'] ?? '').toString(),
           lines: lines,
         ));
       case 'call_blocked':

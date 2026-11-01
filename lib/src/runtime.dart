@@ -983,6 +983,7 @@ class ReceptionistRuntime extends ChangeNotifier {
           'spam': agent.endedAsSpam,
           'name': ?agent.executor.identifiedName,
           'topic': ?agent.executor.topic,
+          'topic_kind': ?responder?.topic?.intent.kind.name,
           'reason': ?agent.executor.identifiedReason,
           'message': ?agent.executor.lastMessage,
           'lines': [for (final line in ended.lines) line.toJson()],
