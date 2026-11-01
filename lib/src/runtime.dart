@@ -836,7 +836,26 @@ class ReceptionistRuntime extends ChangeNotifier {
     }
     final disposition = info.disposition ?? await classify(info.number);
     final agent = Agent(config: config, disposition: disposition, channel: Channel.call, model: model, host: host);
+    unawaited(_warmUp());
     await _startSession(agent, callId: info.callId, bridged: bridge);
+  }
+
+  /// Runs each model once while the greeting plays. After the phone sat idle
+  /// their memory may be swapped out, and the caller's first reply then took
+  /// several seconds longer.
+  Future<void> _warmUp() async {
+    final started = DateTime.now();
+    try {
+      if (decisionReady) {
+        final prompt = renderDecisionPrompt(formatForModel(config.decisionModel), decisionSteps['screen_open']!, 'Hello');
+        await api.call<String>('decisionGenerate',
+            {'prompt': prompt.text, 'staticPrefix': prompt.staticPrefix, 'grammar': '', 'maxTokens': 1});
+      }
+      await intentDetector?.embed(['hello']);
+    } catch (e) {
+      debugLog('warm-up failed: $e');
+    }
+    debugLog('warm-up ms=${DateTime.now().difference(started).inMilliseconds}');
   }
 
   /// Places a call for the owner and pursues [task] when it connects.

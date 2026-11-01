@@ -245,6 +245,9 @@ class VoiceSession extends ChangeNotifier {
   }
 
   void _speak(String text) {
+    // A reply that finished after the call ended must never play: the phone's
+    // own speaker would say it out loud.
+    if (finished) return;
     final clean = speakable(dropNumberQuestions(text));
     if (clean.isEmpty) return;
     final id = '$sessionId-${++_speechCounter}';
@@ -264,6 +267,7 @@ class VoiceSession extends ChangeNotifier {
     if (_paused) return;
     switch (type) {
       case 'utterance':
+        _hearing = false;
         final text = (event['text'] ?? '').toString();
         if (finished || (_closing && event['final'] == true)) {
           // Heard as the line dropped: record it and let the responder act on it.
@@ -274,6 +278,7 @@ class VoiceSession extends ChangeNotifier {
         }
         _onUtterance(text);
       case 'speech_start':
+        _hearing = true;
         _idle?.cancel();
         if (bridged && _speaking.isNotEmpty && !_closing) {
           _bargeIn();
@@ -283,6 +288,7 @@ class VoiceSession extends ChangeNotifier {
           agent.model.cancel();
         }
       case 'speech_discarded':
+        _hearing = false;
         if (finished) return;
         if (_heldInput != null && !_generating) {
           final held = _heldInput!;
@@ -340,8 +346,16 @@ class VoiceSession extends ChangeNotifier {
   /// Nothing is being said or prepared, so a reply would not talk over one.
   bool get _canReply => !finished && !_closing && !_generating && !_transferring && _speaking.isEmpty;
 
+  /// The caller is talking, or their words are still being transcribed.
+  bool _hearing = false;
+
   void _resumeInterrupted(String why) {
     _resumeTimer?.cancel();
+    if (why == 'timeout' && _hearing && !finished) {
+      // Still talking (long sentences take a while): never talk over them.
+      _resumeTimer = Timer(const Duration(seconds: 2), () => _resumeInterrupted('timeout'));
+      return;
+    }
     final text = _interrupted;
     _interrupted = null;
     if (text == null || !_canReply) return;

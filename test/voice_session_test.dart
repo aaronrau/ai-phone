@@ -102,12 +102,26 @@ void main() {
         end(async, session);
       }));
 
-  test('an interruption that never turns into words is followed by the rest of the sentence', () => onClock((async) {
+  test('the assistant never resumes over a caller who is still talking', () => onClock((async) {
         final session = started(async, _session());
         event(session, {'type': 'speech_start'});
-        async.elapse(const Duration(seconds: 6, milliseconds: 100));
+        async.elapse(const Duration(seconds: 12));
+        expect(native.spoken, hasLength(1), reason: 'a long sentence is still being spoken or transcribed');
+        event(session, {'type': 'utterance', 'text': 'Okay.'});
+        async.flushMicrotasks();
         expect(native.spoken, hasLength(2));
         end(async, session);
+      }));
+
+  test('a reply that finishes after the call ended is never spoken', () => onClock((async) {
+        final session = started(async, _session());
+        native.finishSpeaking();
+        unawaited(session.stop());
+        async.flushMicrotasks();
+        final before = native.spoken.length;
+        event(session, {'type': 'utterance', 'text': 'Can I leave a message?'});
+        async.elapse(const Duration(seconds: 5));
+        expect(native.spoken, hasLength(before));
       }));
 
   test('"okay" over the assistant finishes the sentence instead of starting a turn', () => onClock((async) {

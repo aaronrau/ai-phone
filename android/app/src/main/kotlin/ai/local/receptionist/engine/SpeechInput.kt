@@ -129,6 +129,13 @@ class SpeechInput(
     }
 
     private fun listen(sessionId: String, record: AudioRecord?, feed: PcmFeed?) {
+        // Page the recognizer back in while the greeting plays: after the phone
+        // sat idle its weights may be swapped out, and the caller's first
+        // sentence then took seconds longer to transcribe. Same thread, so it
+        // never runs alongside a real decode; audio queues meanwhile.
+        val warmStart = android.os.SystemClock.elapsedRealtime()
+        runCatching { transcribe(FloatArray(SAMPLE_RATE / 2)) }
+        Log.i("SpeechInput", "warm decode ms=${android.os.SystemClock.elapsedRealtime() - warmStart}")
         vadConfig.sileroVadModelConfig.minSilenceDuration = endSilenceSeconds
         val vad = Vad(config = vadConfig)
         val pcm = ShortArray(WINDOW)
