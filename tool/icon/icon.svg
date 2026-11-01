@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="432" height="432">
+  <rect width="108" height="108" fill="#000"/>
+  <!-- Rotary phone: a wide handset over a ten-hole dial, with the stop gap at the lower right. -->
+  <path d="M25,39 Q25,24 54,24 Q83,24 83,39" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round"/>
+  <circle cx="54.00" cy="82.50" r="2.4" fill="#fff"/><circle cx="46.25" cy="80.42" r="2.4" fill="#fff"/><circle cx="40.58" cy="74.75" r="2.4" fill="#fff"/><circle cx="38.50" cy="67.00" r="2.4" fill="#fff"/><circle cx="40.58" cy="59.25" r="2.4" fill="#fff"/><circle cx="46.25" cy="53.58" r="2.4" fill="#fff"/><circle cx="54.00" cy="51.50" r="2.4" fill="#fff"/><circle cx="61.75" cy="53.58" r="2.4" fill="#fff"/><circle cx="67.42" cy="59.25" r="2.4" fill="#fff"/><circle cx="69.50" cy="67.00" r="2.4" fill="#fff"/>
+</svg>

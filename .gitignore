@@ -1,0 +1,52 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+*.iml
+.idea/
+.vscode/
+.metadata.local
+.env
+
+# Android build output and machine-local configuration
+android/.gradle/
+android/.kotlin/
+android/app/.cxx/
+android/local.properties
+android/key.properties
+android/captures/
+android/app/debug/
+android/app/profile/
+android/app/release/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# Private runtime configuration, models and evidence never enter Git
+config/receptionist.json
+models/
+evidence/
+*.gguf
+*.onnx
+*.wav
+
+# Local secrets (API keys, phone numbers)
+.env
+.env.*
+
+# Python bytecode (contains local paths)
+__pycache__/
+*.pyc
+
+# Personal test data: keep it under private/ (or outside the repo).
+private/
+screenshots/
+*.mp4
+*.m4a
+*.pcm
+*.pdu
+result-*.json

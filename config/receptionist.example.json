@@ -1,0 +1,62 @@
+{
+  "enabled": true,
+  "owner_name": "Sam",
+  "owner_pronouns": "they/them",
+  "assistant_name": "Ava",
+  "context": "Sam is a freelance designer. Clients may call about projects; family and friends call about plans.",
+  "voice": "british_female",
+  "gemma_model": "gemma4-e2b-mobile-qat.gguf",
+  "responder": "small_model",
+  "decision_model": "receptionist-decision-v2-350m-q8_0.gguf",
+  "stt_model": "parakeet-0.6b",
+  "llm_threads": 6,
+  "llm_context": 4096,
+  "temperature": 0.4,
+  "call_audio": {
+    "gain": 1.0,
+    "end_silence_seconds": 1.0,
+    "answer_after_seconds": 0,
+    "max_call_seconds": 300,
+    "speaker_capture_source": "voice_communication",
+    "speaker_playback_usage": "media"
+  },
+  "contacts": [
+    {"name": "Jordan Lee", "numbers": ["+15555550100"], "relationship": "sister", "notes": "Prefers texts"},
+    {"name": "Example Spam Co", "numbers": ["+15555550199"], "workflow": "block"}
+  ],
+  "blocked_numbers": ["+15555550111"],
+  "use_phone_contacts": true,
+  "screening_rules": [
+    {"type": "prefix", "value": "+1555"},
+    {"type": "regex", "value": "^\\+1(415|510)"}
+  ],
+  "block_unknown_texters": true,
+  "warm_transfer": true,
+  "transfer_wait_seconds": 25,
+  "embedding_model": "bge-small-en-v1.5-q8_0.gguf",
+  "intent_threshold": 0.70,
+  "sms_reply_limit_per_hour": 6,
+  "workflows": {
+    "known": {
+      "instructions": "The caller is someone {owner_name} knows: {caller_name}{caller_details}. Be warm and brief. {owner_name} is not available right now. Help them by taking a message or checking {owner_name}'s availability when they want to meet or talk. When they have nothing else, say goodbye and use end_conversation.",
+      "greeting": "Hi {caller_first_name}, this is {assistant_name}, {owner_name}'s assistant. {owner_name} can't come to the phone right now. How can I help?",
+      "sms_instructions": "Reply as a short, friendly text message (one or two sentences).",
+      "tools": ["take_message", "check_availability", "remember", "flag_urgent", "end_conversation"]
+    },
+    "screen": {
+      "instructions": "The caller is not in the contact list. First find out who they are and why they are calling, then use record_caller. Do not share any information about {owner_name}. Offer to take a message for genuine reasons; politely refuse sales and spam calls and use mark_spam.",
+      "greeting": "Hello, you've reached {assistant_name}, {owner_name}'s assistant. May I ask who is calling and what it is about?",
+      "sms_instructions": "Reply as a short, polite text message. Ask who they are if they have not said.",
+      "tools": ["record_caller", "take_message", "remember", "mark_spam", "end_conversation"]
+    }
+  },
+  "custom_tools": [
+    {
+      "name": "flag_urgent",
+      "description": "Alert {owner_name} right away when the caller says it is an emergency.",
+      "args": {"reason": "what the emergency is"},
+      "action": "notify",
+      "template": "URGENT from {caller} ({number}): {reason}"
+    }
+  ]
+}

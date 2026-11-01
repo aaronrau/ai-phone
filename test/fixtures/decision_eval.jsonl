@@ -1,0 +1,93 @@
+{"step": "screen_open", "caller": "Hi, this is Alex from Brightside Dental, calling to confirm Sam's cleaning on Tuesday.", "label": "identify", "slots": {"name": "Alex"}}
+{"step": "screen_open", "caller": "It's Maria from the school office about the field trip form.", "label": "identify", "slots": {"name": "Maria"}}
+{"step": "screen_open", "caller": "This is Dave with Northside Plumbing, I'm returning Sam's call about the leak.", "label": "identify", "slots": {"name": "Dave"}}
+{"step": "screen_open", "caller": "yeah hi it's Priya, Sam's coworker, about tomorrow's meeting", "label": "identify", "slots": {"name": "Priya"}}
+{"step": "screen_open", "caller": "My name is Tom Becker, I'm the landlord, it's about the lease renewal.", "label": "identify", "slots": {"name": "Tom Becker"}}
+{"step": "screen_open", "caller": "Hello, Dr. Kim's office calling about test results.", "label": "identify", "slots": {"name": "Dr. Kim"}}
+{"step": "screen_open", "caller": "this is uh Kevin from the bike shop your repair is ready", "label": "identify", "slots": {"name": "Kevin"}}
+{"step": "screen_open", "caller": "It's Sam's neighbor Linda, about the package I'm holding.", "label": "identify", "slots": {"name": "Linda"}}
+{"step": "screen_open", "caller": "Calling from FedEx about a delivery that needs a signature.", "label": "identify"}
+{"step": "screen_open", "caller": "Hi, I'm Jenna, I'm a recruiter at Acme and I wanted to talk about a role Sam applied for.", "label": "identify", "slots": {"name": "Jenna"}}
+{"step": "screen_open", "caller": "this is mike from bright side vental confirming tuesday", "label": "identify", "slots": {"name": "mike"}}
+{"step": "screen_open", "caller": "Oh hi, it's Carla, Sam's cousin, just checking in about Thanksgiving.", "label": "identify", "slots": {"name": "Carla"}}
+{"step": "screen_open", "caller": "We've been trying to reach you about your car's extended warranty.", "label": "spam"}
+{"step": "screen_open", "caller": "Congratulations, you've been selected for a free cruise!", "label": "spam"}
+{"step": "screen_open", "caller": "This is an important message about your student loan forgiveness eligibility.", "label": "spam"}
+{"step": "screen_open", "caller": "Hi, I'm calling from a local solar company, are you the homeowner?", "label": "spam"}
+{"step": "screen_open", "caller": "This is a final notice regarding your social security number.", "label": "spam"}
+{"step": "screen_open", "caller": "We're conducting a short survey about your recent shopping experience.", "label": "spam"}
+{"step": "screen_open", "caller": "Your Amazon account has a suspicious charge, press one to speak to an agent.", "label": "spam"}
+{"step": "screen_open", "caller": "Hello, can I interest you in lowering your credit card interest rate today?", "label": "spam"}
+{"step": "screen_open", "caller": "this is the IRS your account will be suspended", "label": "spam"}
+{"step": "screen_open", "caller": "We buy houses for cash, any condition, are you interested in selling?", "label": "spam"}
+{"step": "screen_open", "caller": "Can you just tell Sam to call me back when he gets a chance?", "label": "message"}
+{"step": "screen_open", "caller": "I'd like to leave a message, please.", "label": "message"}
+{"step": "screen_open", "caller": "Just let Sam know the package arrived and they can pick it up anytime.", "label": "message"}
+{"step": "screen_open", "caller": "Could you ask Sam to call the office back today?", "label": "message"}
+{"step": "screen_open", "caller": "take a message please tell them the meeting moved to 3", "label": "message"}
+{"step": "screen_open", "caller": "Please have Sam return my call, it's about the invoice.", "label": "message"}
+{"step": "screen_open", "caller": "Oh, never mind, I'll call back later. Bye.", "label": "goodbye"}
+{"step": "screen_open", "caller": "That's okay, thanks, goodbye.", "label": "goodbye"}
+{"step": "screen_open", "caller": "No worries, I'll try another time.", "label": "goodbye"}
+{"step": "screen_open", "caller": "Sorry, wrong number.", "label": "goodbye"}
+{"step": "screen_open", "caller": "ok bye", "label": "goodbye"}
+{"step": "screen_open", "caller": "Who is this? Is this a real person?", "label": "other"}
+{"step": "screen_open", "caller": "Is Sam okay? I heard there was an accident.", "label": "other"}
+{"step": "screen_open", "caller": "What's the weather like where you are?", "label": "other"}
+{"step": "screen_open", "caller": "Why do you need to know?", "label": "other"}
+{"step": "screen_open", "caller": "Can I speak to a human please?", "label": "other"}
+{"step": "screen_open", "caller": "Hello? Hello? I can't hear you.", "label": "other"}
+{"step": "screen_open", "caller": "Are you a robot?", "label": "other"}
+{"step": "screen_open", "caller": "Can you give me Sam's email address?", "label": "other"}
+{"step": "known_open", "caller": "Is Sam free on Monday afternoon for coffee?", "label": "availability", "slots": {"day": "Monday"}}
+{"step": "known_open", "caller": "When's Sam available this week?", "label": "availability"}
+{"step": "known_open", "caller": "Could we meet Friday at 10?", "label": "availability", "slots": {"day": "Friday"}}
+{"step": "known_open", "caller": "is she around tomorrow morning", "label": "availability", "slots": {"day": "tomorrow"}}
+{"step": "known_open", "caller": "What does Sam's schedule look like on Thursday?", "label": "availability", "slots": {"day": "Thursday"}}
+{"step": "known_open", "caller": "Can Sam do lunch on Wednesday?", "label": "availability", "slots": {"day": "Wednesday"}}
+{"step": "known_open", "caller": "I wanted to set up a time to talk, maybe Tuesday?", "label": "availability"}
+{"step": "known_open", "caller": "is sam busy at three today", "label": "availability"}
+{"step": "known_open", "caller": "Would next Monday work for dinner?", "label": "availability"}
+{"step": "known_open", "caller": "Does Sam have time this weekend?", "label": "availability"}
+{"step": "known_open", "caller": "Tell Sam I called and ask them to call me back tonight.", "label": "message"}
+{"step": "known_open", "caller": "Can you let Sam know the kids need to be picked up at five?", "label": "message"}
+{"step": "known_open", "caller": "Just pass along that I got the tickets.", "label": "message"}
+{"step": "known_open", "caller": "Please ask Sam to text me when they're done.", "label": "message"}
+{"step": "known_open", "caller": "tell him the car is ready at the dealer", "label": "message"}
+{"step": "known_open", "caller": "I'll leave a message: dinner is moved to Saturday.", "label": "message"}
+{"step": "known_open", "caller": "Can you remind Sam to bring the documents tomorrow?", "label": "message"}
+{"step": "known_open", "caller": "Let Sam know I'm running late.", "label": "message"}
+{"step": "known_open", "caller": "No, that's all, thanks. Bye!", "label": "goodbye"}
+{"step": "known_open", "caller": "Okay never mind, talk later.", "label": "goodbye"}
+{"step": "known_open", "caller": "That's fine, I'll catch Sam later. Goodbye.", "label": "goodbye"}
+{"step": "known_open", "caller": "ok thanks bye bye", "label": "goodbye"}
+{"step": "known_open", "caller": "Nothing, I was just saying hi.", "label": "goodbye"}
+{"step": "known_open", "caller": "How are you doing today?", "label": "other"}
+{"step": "known_open", "caller": "Is Sam sick? They didn't come to work.", "label": "other"}
+{"step": "known_open", "caller": "What's Sam's new address?", "label": "other"}
+{"step": "known_open", "caller": "Can you put Sam on the phone? It's urgent.", "label": "other"}
+{"step": "known_open", "caller": "Do you know if Sam got my email?", "label": "other"}
+{"step": "known_open", "caller": "What's your name again?", "label": "other"}
+{"step": "known_open", "caller": "Did Sam already eat dinner?", "label": "other"}
+{"step": "known_open", "caller": "Can you transfer me to Sam's work line?", "label": "other"}
+{"step": "known_open", "caller": "Is this an AI?", "label": "other"}
+{"step": "known_open", "caller": "uh what", "label": "other"}
+{"step": "anything_else", "caller": "No, that's it, thank you.", "label": "goodbye"}
+{"step": "anything_else", "caller": "Nope, all good. Bye.", "label": "goodbye"}
+{"step": "anything_else", "caller": "That's everything.", "label": "goodbye"}
+{"step": "anything_else", "caller": "no thanks", "label": "goodbye"}
+{"step": "anything_else", "caller": "I think that's all, have a good day.", "label": "goodbye"}
+{"step": "anything_else", "caller": "Nothing else, goodbye.", "label": "goodbye"}
+{"step": "anything_else", "caller": "Yes, also tell Sam the dog needs his shots.", "label": "message"}
+{"step": "anything_else", "caller": "Actually, can you add that I'll be there at seven?", "label": "message"}
+{"step": "anything_else", "caller": "One more thing, ask Sam to call the bank.", "label": "message"}
+{"step": "anything_else", "caller": "oh and let them know grandma says hi", "label": "message"}
+{"step": "anything_else", "caller": "Actually, is Sam free Thursday instead?", "label": "availability", "slots": {"day": "Thursday"}}
+{"step": "anything_else", "caller": "Yes, when would Sam be available next week?", "label": "availability"}
+{"step": "anything_else", "caller": "What about Saturday morning?", "label": "availability", "slots": {"day": "Saturday"}}
+{"step": "anything_else", "caller": "And could we do Friday at noon?", "label": "availability"}
+{"step": "anything_else", "caller": "Wait, who am I talking to?", "label": "other"}
+{"step": "anything_else", "caller": "How long have you worked for Sam?", "label": "other"}
+{"step": "anything_else", "caller": "Can you read that back to me?", "label": "other"}
+{"step": "anything_else", "caller": "Is it going to rain tomorrow?", "label": "other"}
+{"step": "anything_else", "caller": "Hmm, let me think.", "label": "other"}

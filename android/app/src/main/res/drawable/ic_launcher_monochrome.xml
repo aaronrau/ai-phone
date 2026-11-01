@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rotary phone for themed icons. Source: tool/icon/icon.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3.6" android:strokeLineCap="round"
+        android:pathData="M25,39 Q25,24 54,24 Q83,24 83,39" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M56.40,82.50 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M48.65,80.42 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M42.98,74.75 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M40.90,67.00 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M42.98,59.25 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M48.65,53.58 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M56.40,51.50 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M64.15,53.58 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M69.82,59.25 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z M71.90,67.00 a2.4,2.4 0 1 0 -4.8,0 a2.4,2.4 0 1 0 4.8,0 Z" />
+</vector>

@@ -1,0 +1,284 @@
+diff --git a/include/speech_core/models/onnx_engine.h b/include/speech_core/models/onnx_engine.h
+index b73f183..4ef88e7 100644
+--- a/include/speech_core/models/onnx_engine.h
++++ b/include/speech_core/models/onnx_engine.h
+@@ -128,6 +128,10 @@ public:
+         ort_check(api_, api_->SetSessionGraphOptimizationLevel(opts, opt_level));
+         ort_check(api_, api_->SetIntraOpNumThreads(
+             opts, resolve_intra_threads(intra_threads)));
++        if (std::getenv("SIM453_POCKET_NO_SPIN")) {
++            ort_check(api_, api_->AddSessionConfigEntry(
++                opts, "session.intra_op.allow_spinning", "0"));
++        }
+         // EXPERIMENT: share a single CPU arena across all sessions. Each
+         // session.use_env_allocators=1 routes its CPU allocations through
+         // the env's registered arena instead of creating a per-session one.
+@@ -191,8 +195,10 @@ public:
+         // 1342 MB -> 1147 MB peak RSS (-15%), throughput 12.9x -> 12.2x
+         // real-time (-6%). On-device / embedded targets are memory-bound, not
+         // throughput-bound here, so this is the right default.
+-        ort_check(api_, api_->DisableCpuMemArena(opts));
+-        ort_check(api_, api_->DisableMemPattern(opts));
++        if (!std::getenv("SIM453_POCKET_ARENA")) {
++            ort_check(api_, api_->DisableCpuMemArena(opts));
++            ort_check(api_, api_->DisableMemPattern(opts));
++        }
+         // EXPERIMENT: BF16 models route weights through a Cast(BF16->FP32)
+         // node per initializer. ORT's ConstantFolding optimizer would
+         // collapse each Cast into an FP32 constant at session-load time,
+diff --git a/include/speech_core/models/onnx_pocket_tts.h b/include/speech_core/models/onnx_pocket_tts.h
+index 6ba0ef9..354dba9 100644
+--- a/include/speech_core/models/onnx_pocket_tts.h
++++ b/include/speech_core/models/onnx_pocket_tts.h
+@@ -67,6 +67,7 @@ public:
+                     TTSChunkCallback on_chunk) override;
+     int output_sample_rate() const override { return 24000; }
+     void cancel() override;
++    void set_voice(const std::string& voice_id) override;
+ 
+     PocketTtsMetrics last_metrics() const;
+ 
+diff --git a/src/models/pocket/onnx_pocket_tts.cpp b/src/models/pocket/onnx_pocket_tts.cpp
+index bb3cdf9..67e6e61 100644
+--- a/src/models/pocket/onnx_pocket_tts.cpp
++++ b/src/models/pocket/onnx_pocket_tts.cpp
+@@ -6,17 +6,20 @@
+ #include <algorithm>
+ #include <atomic>
+ #include <chrono>
++#include <condition_variable>
+ #include <cmath>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+ #include <fstream>
+ #include <limits>
++#include <map>
+ #include <memory>
+ #include <mutex>
+ #include <random>
+ #include <stdexcept>
+ #include <string>
++#include <thread>
+ #include <utility>
+ #include <vector>
+ 
+@@ -101,7 +104,7 @@ struct OrtStringHandle {
+ class OnnxPocketTts::Impl {
+ public:
+     Impl(const std::string& bundle_directory, PocketTtsConfig config)
+-        : config_(config) {
++        : config_(config), bundle_directory_(bundle_directory) {
+         validate_config();
+ 
+         const auto lm_main_path = required_path(bundle_directory, "lm_main.int8.onnx");
+@@ -132,8 +135,9 @@ public:
+ 
+         tokenizer_ = std::make_unique<PocketTtsTokenizer>(vocabulary_path, scores_path);
+         lm_cache_length_ = query_lm_cache_length();
+-        voice_embedding_ = create_voice_embedding();
+-        const auto voice_shape = tensor_shape(voice_embedding_.get());
++        voices_.emplace("alba", create_voice_embedding());
++        voice_embedding_ = voices_.at("alba").get();
++        const auto voice_shape = tensor_shape(voice_embedding_);
+         if (voice_shape.size() != 3 || voice_shape[0] != 1 || voice_shape[2] != 1024) {
+             throw std::runtime_error("Pocket TTS fixed voice embedding has an unexpected shape");
+         }
+@@ -144,6 +148,43 @@ public:
+         encoder_.reset();
+     }
+ 
++    void set_voice(const std::string& voice) {
++        std::lock_guard<std::mutex> lock(synthesis_mutex_);
++        if (voice != "alba" && voice != "marius" && voice != "javert" &&
++            voice != "fantine" && voice != "eponine" && voice != "azelma" && voice != "british_female" &&
++            voice != "reference_6" && voice != "reference_7" && voice != "reference_8" &&
++            voice != "reference_11" && voice != "reference_12" && voice != "reference_13" &&
++            voice != "reference_14" && voice != "reference_15" && voice != "reference_16" &&
++            voice != "reference_17" && voice != "reference_19" && voice != "reference_20" &&
++            voice != "reference_21" && voice != "reference_22" && voice != "reference_24" &&
++            voice != "reference_26" && voice != "reference_27" && voice != "reference_28" &&
++            voice != "reference_29" && voice != "reference_32") {
++            throw std::invalid_argument("Unsupported Pocket preset");
++        }
++        if (voices_.find(voice) == voices_.end()) {
++            auto session = load_session(OnnxEngine::get(),
++                required_path(bundle_directory_, ("voices/" + voice + ".onnx").c_str()), false);
++            auto io = query_io(session.get());
++            require_io(io, 1, 1, "audio", "latents", "voice adapter");
++            float placeholder = 0;
++            auto audio = tensor_view(&placeholder, 1, {1, 1, 1}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
++            auto outputs = run(session.get(), io, {audio.get()});
++            const auto shape = tensor_shape(outputs[0].get());
++            if (shape.size() != 3 || shape[0] != 1 || shape[2] != 1024 ||
++                shape[1] < 1 || shape[1] > 200) {
++                throw std::runtime_error("Invalid Pocket preset shape");
++            }
++            float* values = nullptr;
++            ort_check(api_, api_->GetTensorMutableData(outputs[0].get(), reinterpret_cast<void**>(&values)));
++            for (size_t i = 0; i < tensor_element_count(outputs[0].get()); ++i) {
++                if (!std::isfinite(values[i])) throw std::runtime_error("Invalid Pocket preset data");
++            }
++            voices_.emplace(voice, std::move(outputs[0]));
++        }
++        voice_embedding_ = voices_.at(voice).get();
++        voice_tokens_ = static_cast<int>(tensor_shape(voice_embedding_)[1]);
++    }
++
+     void synthesize(const std::string& text,
+                     const std::string& language,
+                     TTSChunkCallback on_chunk) {
+@@ -193,7 +227,7 @@ public:
+         auto empty_sequence = owned_tensor(
+             {1, 0, 32}, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, true);
+ 
+-        run_lm(empty_sequence.get(), voice_embedding_.get(), lm_state);
++        run_lm(empty_sequence.get(), voice_embedding_, lm_state);
+         run_lm(empty_sequence.get(), text_embedding.get(), lm_state);
+         text_embedding.reset();
+ 
+@@ -211,6 +245,38 @@ public:
+ 
+         int eos_frame = -1;
+         bool first_audio = true;
++        const int batch_frames = std::getenv("SIM453_POCKET_FRAME_BATCH")
++            ? std::stoi(std::getenv("SIM453_POCKET_FRAME_BATCH")) : 1;
++        if (batch_frames < 1 || batch_frames > 8) {
++            throw std::invalid_argument("Frame batch must be in [1,8]");
++        }
++        const auto decode = [&](std::vector<float>& pending_latents) {
++            if (pending_latents.empty() || cancelled_.load()) return;
++            const auto frames = pending_latents.size() / 32;
++            auto latent = tensor_view(
++                pending_latents.data(), pending_latents.size(),
++                {1, static_cast<int64_t>(frames), 32},
++                ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
++            auto audio = run_decoder(latent.get(), decoder_state);
++            const std::size_t sample_count = tensor_element_count(audio.get());
++            if (sample_count != frames * 1920) {
++                throw std::runtime_error("Unexpected decoder frame count");
++            }
++            float* samples = nullptr;
++            ort_check(api_, api_->GetTensorMutableData(audio.get(),
++                reinterpret_cast<void**>(&samples)));
++            if (first_audio) {
++                metrics.first_audio_ms = elapsed_ms(started, Clock::now());
++                first_audio = false;
++            }
++            if (!cancelled_.load()) {
++                on_chunk(samples, sample_count, false);
++                metrics.frames_generated += frames;
++                metrics.output_samples += static_cast<int>(sample_count);
++            }
++        };
++        const auto generate = [&](const auto& emit) {
++        std::vector<float> pending_latents;
+         for (int frame = 0; frame < frame_limit; ++frame) {
+             if (cancelled_.load()) break;
+ 
+@@ -236,26 +302,64 @@ public:
+             for (float& value : noise) value = distribution(rng);
+ 
+             current = run_flow(conditioning.get(), noise);
+-            auto latent = tensor_view(
+-                current.data(), current.size(), {1, 1, 32},
+-                ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
+-            auto audio = run_decoder(latent.get(), decoder_state);
+-            const std::size_t sample_count = tensor_element_count(audio.get());
+-            if (sample_count != 1920) {
+-                throw std::runtime_error(
+-                    "Pocket TTS Mimi decoder did not return one 1,920-sample frame");
+-            }
+-            float* samples = nullptr;
+-            ort_check(api_, api_->GetTensorMutableData(audio.get(),
+-                                                       reinterpret_cast<void**>(&samples)));
+-
+-            if (first_audio) {
+-                metrics.first_audio_ms = elapsed_ms(started, Clock::now());
+-                first_audio = false;
++            pending_latents.insert(pending_latents.end(), current.begin(), current.end());
++            if (pending_latents.size() >= static_cast<size_t>(batch_frames * 32)) emit(pending_latents);
++        }
++        if (!pending_latents.empty()) emit(pending_latents);
++        };
++        if (std::getenv("SIM453_POCKET_PIPELINE")) {
++            // One queued latent batch. Decoder/playback backpressure cannot
++            // accumulate utterances or unbounded generated audio.
++            std::mutex queue_mutex;
++            std::condition_variable changed;
++            std::vector<float> ready;
++            bool done = false;
++            std::exception_ptr error;
++            std::thread producer([&] {
++                try {
++                    generate([&](std::vector<float>& pending) {
++                        std::unique_lock<std::mutex> lock(queue_mutex);
++                        while (!ready.empty() && !cancelled_.load()) {
++                            changed.wait_for(lock, std::chrono::milliseconds(10));
++                        }
++                        if (cancelled_.load()) return;
++                        ready.swap(pending);
++                        changed.notify_one();
++                    });
++                } catch (...) {
++                    error = std::current_exception();
++                }
++                std::lock_guard<std::mutex> lock(queue_mutex);
++                done = true;
++                changed.notify_one();
++            });
++            try {
++                while (!cancelled_.load()) {
++                    std::vector<float> batch;
++                    {
++                        std::unique_lock<std::mutex> lock(queue_mutex);
++                        while (ready.empty() && !done && !cancelled_.load()) {
++                            changed.wait_for(lock, std::chrono::milliseconds(10));
++                        }
++                        if (cancelled_.load() || (ready.empty() && done)) break;
++                        batch.swap(ready);
++                        changed.notify_one();
++                    }
++                    decode(batch);
++                }
++                producer.join();
++                if (error) std::rethrow_exception(error);
++            } catch (...) {
++                cancelled_.store(true);
++                changed.notify_all();
++                if (producer.joinable()) producer.join();
++                throw;
+             }
+-            on_chunk(samples, sample_count, false);
+-            ++metrics.frames_generated;
+-            metrics.output_samples += static_cast<int>(sample_count);
++        } else {
++            generate([&](std::vector<float>& pending) {
++                decode(pending);
++                pending.clear();
++            });
+         }
+ 
+         metrics.cancelled = cancelled_.load();
+@@ -616,7 +720,9 @@ private:
+     IoNames encoder_io_;
+ 
+     std::unique_ptr<PocketTtsTokenizer> tokenizer_;
+-    ValuePtr voice_embedding_{nullptr, ValueDeleter{}};
++    std::string bundle_directory_;
++    std::map<std::string, ValuePtr> voices_;
++    OrtValue* voice_embedding_ = nullptr;
+     int voice_tokens_ = 0;
+     int lm_cache_length_ = 0;
+ 
+@@ -642,6 +748,10 @@ void OnnxPocketTts::cancel() {
+     impl_->cancel();
+ }
+ 
++void OnnxPocketTts::set_voice(const std::string& voice_id) {
++    impl_->set_voice(voice_id);
++}
++
+ PocketTtsMetrics OnnxPocketTts::last_metrics() const {
+     return impl_->last_metrics();
+ }
