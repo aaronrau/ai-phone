@@ -19,6 +19,33 @@ Future<List<List<double>>> fakeEmbed(List<String> texts) async => [
 void main() {
   final detector = IntentDetector(intents: IntentDef.defaults, embed: fakeEmbed, threshold: 0.5);
 
+  test('saved example vectors skip re-embedding on the next start', () async {
+    await detector.prepare();
+    var embedded = 0;
+    final restarted = IntentDetector(
+        intents: IntentDef.defaults,
+        embed: (texts) {
+          embedded += texts.length;
+          return fakeEmbed(texts);
+        },
+        threshold: 0.5)
+      ..preload(detector.vectors);
+    expect(restarted.ready, isTrue);
+    await restarted.prepare();
+    expect(embedded, 0);
+    // A new example is the only one embedded.
+    final edited = IntentDetector(
+        intents: [...IntentDef.defaults, IntentDef(name: 'Gym', kind: IntentKind.reason, examples: ['spin class'])],
+        embed: (texts) {
+          embedded += texts.length;
+          return fakeEmbed(texts);
+        },
+        threshold: 0.5)
+      ..preload(detector.vectors);
+    await edited.prepare();
+    expect(embedded, 1);
+  });
+
   test('the closest topic wins and carries its kind', () async {
     final plans = await detector.detect('Are we still meeting for coffee tomorrow?');
     expect(plans!.intent.name, 'Plans');

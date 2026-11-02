@@ -64,6 +64,26 @@ class Store {
   final Directory directory;
 
   File get _config => File('${directory.path}/receptionist.json');
+  File get _intentVectors => File('${directory.path}/intent_vectors.json');
+
+  /// Saved topic-example embeddings for [model], so a restart does not
+  /// re-embed every example (about a minute on a mid-range phone).
+  Future<Map<String, List<double>>> intentVectors(String model) async {
+    try {
+      if (!await _intentVectors.exists()) return {};
+      final json = jsonDecode(await _intentVectors.readAsString()) as Map<String, dynamic>;
+      if (json['model'] != model) return {};
+      return {
+        for (final e in (json['vectors'] as Map<String, dynamic>).entries)
+          e.key: [for (final x in e.value as List) (x as num).toDouble()],
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> saveIntentVectors(String model, Map<String, List<double>> vectors) =>
+      _atomicWrite(_intentVectors, jsonEncode({'model': model, 'vectors': vectors}));
   File get _messages => File('${directory.path}/messages.jsonl');
   File get _activity => File('${directory.path}/activity.jsonl');
   File get _threads => File('${directory.path}/sms_threads.json');

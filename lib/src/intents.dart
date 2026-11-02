@@ -152,6 +152,18 @@ class IntentDetector {
 
   bool get ready => intents.every((i) => i.examples.every(_vectors.containsKey));
 
+  /// Every example's vector, to save and [preload] on the next start.
+  Map<String, List<double>> get vectors => Map.unmodifiable(_vectors);
+
+  /// Vectors saved earlier for the same embedding model; only current
+  /// examples are kept, and any missing ones are embedded by [prepare].
+  void preload(Map<String, List<double>> saved) {
+    final wanted = {for (final i in intents) ...i.examples};
+    for (final e in saved.entries) {
+      if (wanted.contains(e.key)) _vectors[e.key] = e.value;
+    }
+  }
+
   /// Embeds every example once.
   Future<void> prepare() async {
     final missing = {for (final i in intents) ...i.examples}.where((e) => !_vectors.containsKey(e)).toList();

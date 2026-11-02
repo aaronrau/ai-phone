@@ -437,6 +437,16 @@ class TieredResponder implements TurnResponder {
       await onAnswer?.call(callerSaid);
       return FastTurn(phrases.render('message_taken', _values), label: 'task_answer', ms: _ms(started));
     }
+    // "Thank you." / "No, that's all. Goodbye." once a message is taken, or
+    // instead of leaving one: the caller is done. Never record that as the
+    // message or offer to take one again.
+    if ((awaitingMessage || agent.executor.lastMessage != null) && closingOnly(callerSaid)) {
+      awaitingMessage = false;
+      misses = 0;
+      _next();
+      goodbyes++;
+      return FastTurn(phrases.render('goodbye', _values), ends: true, hangUp: true, label: 'goodbye', ms: _ms(started));
+    }
     if (awaitingMessage) {
       // Whatever the caller says now is the message.
       return _takeMessage(callerSaid, started);
@@ -573,3 +583,12 @@ bool shouldHangUpAsSpam(String label, double probability, String text, {bool top
 /// owner name "the owner" can open a sentence.
 String sentenceCase(String text) => text.replaceAllMapped(
     RegExp(r'(^|[.!?]\s+)([a-z])'), (m) => '${m[1]}${m[2]!.toUpperCase()}');
+
+final _closingWords = RegExp(
+    r"^(?:(?:no|nope|nah|ok(?:ay)?|great|perfect|alright|all right|that'?s (?:all|it|everything)|nothing else|"
+    r"i'?m (?:good|all set)|thank(?:s| you)(?: (?:so|very) much)?(?: anyway)?|you too|(?:good ?)?bye|"
+    r"have a (?:good|nice|great) (?:day|one|night|evening))[\s,.!]*)+$",
+    caseSensitive: false);
+
+/// Only thanks, "that's all" or goodbye: the caller is wrapping up.
+bool closingOnly(String said) => _closingWords.hasMatch(said.trim());

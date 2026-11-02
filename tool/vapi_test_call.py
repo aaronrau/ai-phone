@@ -87,6 +87,18 @@ SCENARIOS = {
                   'moved to seven. Then say goodbye. Speak in short sentences.',
         'maxDurationSeconds': 150,
     },
+    # Call waiting, first caller: put on hold while the assistant answers
+    # another call, then picks up where they left off.
+    'waiting': {
+        'firstMessage': '',
+        'system': 'You are Alex from Brightside Dental calling to confirm Sam\'s cleaning appointment on Tuesday. '
+                  'An assistant will answer. Wait for the greeting, then say who you are and why you called. '
+                  'If you are asked to hold, say "Sure" once and then stay completely silent until the assistant '
+                  'speaks to you again. Then ask the assistant to have Sam call the office back today. When they '
+                  'confirm, say goodbye. Speak in short sentences and wait for answers.',
+        'maxDurationSeconds': 240,
+        'silenceTimeoutSeconds': 150,
+    },
     'spam': {
         'firstMessage': '',
         'system': 'You are a telemarketer calling about a car\'s extended warranty. Wait for the greeting, then '
@@ -160,7 +172,7 @@ def main() -> None:
         },
         'transcriber': {'provider': 'deepgram', 'model': 'nova-2', 'language': 'en'},
         'maxDurationSeconds': scenario['maxDurationSeconds'],
-        'silenceTimeoutSeconds': 45,
+        'silenceTimeoutSeconds': scenario.get('silenceTimeoutSeconds', 45),
         'backgroundSound': 'off',
     }
     if scenario['firstMessage']:

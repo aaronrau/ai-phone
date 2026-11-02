@@ -49,8 +49,12 @@ void main() {
         async.elapse(const Duration(seconds: 1));
 
         ring(async, 'call-2', number: '+15555550124');
-        // The first caller hears why before going on hold.
+        // The first caller hears why before going on hold, in full even if
+        // they answer over it.
         expect(native.spoken.last, 'Sorry, another call is coming in. Please hold for a moment.');
+        native.emit({'type': 'speech_start', 'session': first.sessionId});
+        async.flushMicrotasks();
+        expect(native.log, isNot(contains('stopSpeaking')));
         expect(answered(), ['call-1'], reason: 'not until the first caller has been told');
         native.finishSpeaking();
         async.elapse(const Duration(seconds: 1));

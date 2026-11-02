@@ -33,7 +33,11 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
         latch.await(timeoutMs, TimeUnit.MILLISECONDS)
     }
 
-    private data class Item(val id: String, val text: String, val voice: String, val generation: Long)
+    private data class Item(val id: String, val text: String, val voice: String, val generation: Long,
+                            val cache: Boolean = false, val silent: Boolean = false)
+
+    /** Where fixed lines (greetings, hold lines) keep their rendered audio. */
+    @Volatile var cacheDirectory: java.io.File? = null
 
     @Volatile var tts: PocketTts? = null
 
@@ -70,8 +74,13 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
 
     val active: Boolean get() = rendering || queue.isNotEmpty() || SystemClock.elapsedRealtime() < audibleUntil
 
-    fun speak(id: String, text: String, voice: String) {
-        queue.put(Item(id, text, voice, generation.get()))
+    /** Renders a fixed line into the cache without playing it (idle time only). */
+    fun prerender(text: String, voice: String) {
+        queue.put(Item("prerender", text, voice, generation.get(), cache = true, silent = true))
+    }
+
+    fun speak(id: String, text: String, voice: String, cache: Boolean = false) {
+        queue.put(Item(id, text, voice, generation.get(), cache))
     }
 
     /** Drops queued speech and silences current playback immediately. */
@@ -121,7 +130,11 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
             if (item.generation != generation.get()) continue
             val engine = tts
             if (engine == null) {
-                emit(mapOf("type" to "tts_error", "id" to item.id, "message" to "Speech model not loaded"))
+                if (!item.silent) emit(mapOf("type" to "tts_error", "id" to item.id, "message" to "Speech model not loaded"))
+                continue
+            }
+            if (item.silent) {
+                runCatching { renderOrCached(engine, item) {} }
                 continue
             }
             rendering = true
@@ -139,8 +152,8 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
                     written = audio.playbackHeadPosition.toLong() and 0xffffffffL
                     audio.play()
                 }
-                val finished = engine.render(item.text, item.voice) { frame ->
-                    if (item.generation != generation.get()) return@render
+                val finished = renderOrCached(engine, item) { frame ->
+                    if (item.generation != generation.get()) return@renderOrCached
                     if (firstFrame < 0) firstFrame = SystemClock.elapsedRealtime() - start
                     val scaled = applyGain(frame)
                     audio.write(scaled, 0, scaled.size)
@@ -179,8 +192,8 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
     private fun renderToBridge(engine: PocketTts, item: Item, sink: (ByteArray) -> Boolean, start: Long) {
         var firstFrame = -1L
         var audioSamples = 0L
-        val finished = engine.render(item.text, item.voice) { frame ->
-            if (item.generation != generation.get()) return@render
+        val finished = renderOrCached(engine, item) { frame ->
+            if (item.generation != generation.get()) return@renderOrCached
             audioSamples += frame.size / 2
             val now = SystemClock.elapsedRealtime()
             if (firstFrame < 0) firstFrame = now - start
@@ -225,6 +238,50 @@ class SpeechOutput(private val sink: (Map<String, Any?>) -> Unit) {
             written += chunk.size / 2
         }
         musicUntil += 100
+    }
+
+    /**
+     * Fixed lines play from audio rendered once and saved, so the greeting
+     * starts at once and never competes with models warming up at the start
+     * of a call. Other text is rendered as usual.
+     */
+    private fun renderOrCached(engine: PocketTts, item: Item, onFrame: (ByteArray) -> Unit): Boolean {
+        val directory = cacheDirectory
+        if (!item.cache || directory == null) return engine.render(item.text, item.voice, onFrame)
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("v1\n${item.voice}\n${item.text}".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val file = java.io.File(directory, "$digest.pcm")
+        if (file.isFile && file.length() > 0) {
+            val bytes = runCatching { file.readBytes() }.getOrNull()
+            if (bytes != null) {
+                val chunk = PocketTts.SAMPLE_RATE / 10 * 2 // 100 ms
+                var offset = 0
+                while (offset < bytes.size) {
+                    if (item.generation != generation.get()) return false
+                    val end = minOf(offset + chunk, bytes.size)
+                    onFrame(bytes.copyOfRange(offset, end))
+                    offset = end
+                }
+                return true
+            }
+        }
+        val rendered = java.io.ByteArrayOutputStream()
+        val finished = engine.render(item.text, item.voice) { frame ->
+            rendered.write(frame)
+            onFrame(frame)
+        }
+        if (finished && item.generation == generation.get()) {
+            runCatching {
+                directory.mkdirs()
+                // Keep the cache small: drop the oldest lines beyond 64.
+                directory.listFiles()?.sortedBy { it.lastModified() }?.dropLast(63)?.forEach { it.delete() }
+                val temp = java.io.File(directory, "$digest.tmp")
+                temp.writeBytes(rendered.toByteArray())
+                temp.renameTo(file)
+            }
+        }
+        return finished
     }
 
     private fun applyGain(frame: ByteArray): ByteArray {

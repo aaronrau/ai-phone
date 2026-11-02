@@ -282,12 +282,30 @@ class ReceptionistRuntime extends ChangeNotifier {
       modelState = 'ready';
       await _loadDecisionModel();
       await loadIntents();
+      unawaited(_prerenderFixedLines());
     } catch (e) {
       modelsReady = false;
       modelState = 'failed';
       modelError = e.toString();
     }
     await refreshStatus();
+  }
+
+  /// Renders the unknown-caller greeting and the fixed call lines into the
+  /// speech cache while the phone is idle, so even the first call after a
+  /// restart starts speaking at once. Lines already cached cost nothing.
+  Future<void> _prerenderFixedLines() async {
+    try {
+      final unknown = await classify('+10000000000');
+      final greeting = Agent(config: config, disposition: unknown, channel: Channel.call, model: model, host: host)
+          .startCall();
+      await api.call('speechPrerender', {
+        'voice': config.voice,
+        'texts': [greeting, ...fixedCallLines(config.ownerName)],
+      });
+    } catch (e) {
+      debugLog('prerender failed: $e');
+    }
   }
 
   Future<void> _loadDecisionModel() async {
@@ -316,8 +334,11 @@ class ReceptionistRuntime extends ChangeNotifier {
     try {
       final started = DateTime.now();
       await api.call('embedLoad', {'model': config.embeddingModel, 'threads': 4});
-      final detector = IntentDetector(intents: config.intents, embed: _embed, threshold: config.intentThreshold);
+      final detector = IntentDetector(intents: config.intents, embed: _embed, threshold: config.intentThreshold)
+        ..preload(await store?.intentVectors(config.embeddingModel) ?? const {});
+      final cached = detector.ready;
       await detector.prepare();
+      if (!cached) await store?.saveIntentVectors(config.embeddingModel, detector.vectors);
       intentDetector = detector;
       intentStatus = 'ready (${config.intents.length} topics, '
           '${DateTime.now().difference(started).inMilliseconds} ms)';

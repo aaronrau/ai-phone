@@ -129,9 +129,10 @@ class VoiceSession extends ChangeNotifier {
   /// Running for 5 s after each hold update, so updates never pile up.
   Timer? _holdSpacing;
 
+  /// A fixed line: its audio is cached on the phone.
   void _say(String line) {
     _add('assistant', line);
-    _speak(line);
+    _speak(line, cache: true);
   }
   Completer<void>? _drained;
 
@@ -158,7 +159,8 @@ class VoiceSession extends ChangeNotifier {
       final greeting = withNote(agent.startCall(), greetingNote);
       tiered?.start(greeting: greeting);
       _add('assistant', greeting);
-      _speak(greeting);
+      // Greetings without an owner's note are the same every call: cached.
+      _speak(greeting, cache: greetingNote == null);
     }
     if (!outbound && (tiered == null || tiered!.escalateToLargeModel)) {
       unawaited(agent.prefill().catchError((Object e) => api.log('prefill failed: $e')));
@@ -183,6 +185,7 @@ class VoiceSession extends ChangeNotifier {
   /// On hold while the assistant answers another call (call waiting).
   bool get paused => _paused;
   bool _paused = false;
+  bool _announcing = false;
   DateTime? _pausedAt;
 
   /// A conversation that can step away for another call: not in the middle
@@ -198,8 +201,11 @@ class VoiceSession extends ChangeNotifier {
     _interrupted = null;
     if (_generating) agent.model.cancel();
     await _waitForSpeech(const Duration(seconds: 6));
+    // Said in full even if the caller answers over it ("Sure").
+    _announcing = true;
     _say('Sorry, another call is coming in. Please hold for a moment.');
     await _waitForSpeech(const Duration(seconds: 10));
+    _announcing = false;
     _paused = true;
     _pausedAt = DateTime.now();
     _limit?.cancel();
@@ -244,7 +250,7 @@ class VoiceSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _speak(String text) {
+  void _speak(String text, {bool cache = false}) {
     // A reply that finished after the call ended must never play: the phone's
     // own speaker would say it out loud.
     if (finished) return;
@@ -256,7 +262,7 @@ class VoiceSession extends ChangeNotifier {
     _spokeThisStep = true;
     state = 'speaking';
     notifyListeners();
-    unawaited(api.speak(id, clean, config.voice));
+    unawaited(api.speak(id, clean, config.voice, cache: cache));
   }
 
   void _onEvent(Map<String, dynamic> event) {
@@ -280,7 +286,7 @@ class VoiceSession extends ChangeNotifier {
       case 'speech_start':
         _hearing = true;
         _idle?.cancel();
-        if (bridged && _speaking.isNotEmpty && !_closing) {
+        if (bridged && _speaking.isNotEmpty && !_closing && !_announcing) {
           _bargeIn();
         } else if (_generating && !_spokeThisStep) {
           // The caller kept talking: drop a reply that has not been spoken yet;
@@ -622,3 +628,13 @@ String withNote(String greeting, String? note) {
   if (text.endsWith('?')) return '$opening $text';
   return closing.isEmpty ? '$opening $text' : '$opening $text $closing';
 }
+
+/// Lines a call may use word for word, worth rendering ahead of time.
+List<String> fixedCallLines(String owner) => [
+      'Are you still there?',
+      'Thanks for calling. Goodbye.',
+      "Sorry, I didn't catch that. Could you say it again?",
+      'Sorry, another call is coming in. Please hold for a moment.',
+      'Thanks for holding.',
+      sentenceCase('Still trying $owner. Thanks for holding.'),
+    ];

@@ -40,6 +40,12 @@ goodbye, after spam, or when the line goes quiet (on calls it answers it asks
 "Are you still there?" after 8 s and says goodbye 10 s later; 30 s on calls it
 places; never while on hold).
 
+Fixed lines (the greeting, "Are you still there?", hold lines, goodbye) are
+rendered once after the models load and replayed from the phone's cache, so a
+call starts speaking at once; each model also runs once while the greeting
+plays, because a phone that sat idle may have swapped them out. Topic-example
+embeddings are saved too, so a restart does not re-embed every example.
+
 The line is never left dead: if the caller talks over the assistant and it was
 only noise or "okay" / "mm-hmm", the assistant finishes its sentence; speech it
 could not make out gets "Sorry, I didn't catch that"; and a caller waiting for

@@ -98,6 +98,34 @@ void main() {
     expect(second!.ends, isTrue);
   });
 
+  test('closing words never become a message', () {
+    for (final s in ['Thank you.', "No, that's all. Goodbye.", 'No thanks, bye!', "Okay, that's it. Thanks so much."]) {
+      expect(closingOnly(s), isTrue, reason: s);
+    }
+    for (final s in ['Yes.', 'Please have Sam call the office back today.', 'No, tell Sam to call me.']) {
+      expect(closingOnly(s), isFalse, reason: s);
+    }
+  });
+
+  test('after a message, "thank you" and "that\'s all" end the call politely', () async {
+    final (r, host) = _responder('+15555550123', {});
+    r.awaitingMessage = true;
+    final taken = await r.handle('Please have Sam call the office back today.');
+    expect(taken!.say, contains("I'll pass that on"));
+    final thanks = await r.handle('Thank you.');
+    expect(thanks!.say, 'Thanks for calling. Goodbye.');
+    expect(thanks.hangUp, isTrue);
+    expect(host.messages, hasLength(1));
+  });
+
+  test('declining to leave a message is not recorded as one', () async {
+    final (r, host) = _responder('+15555550123', {});
+    r.awaitingMessage = true;
+    final turn = await r.handle("No, that's all. Goodbye.");
+    expect(turn!.label, 'goodbye');
+    expect(host.messages, isEmpty);
+  });
+
   test('two misses in a row are recorded as a message and the call stays open', () async {
     final (r, host) = _responder('+15555550123', {});
     final first = await r.handle('What is the meaning of life?');

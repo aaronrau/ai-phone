@@ -273,9 +273,16 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                         decisionEngine.generate(prompt, grammar, maxTokens, 0f, null, prefix)
                     }
                 }
+                "speechPrerender" -> {
+                    output.cacheDirectory = File(context.cacheDir, "speech")
+                    val voice = call.argument<String>("voice") ?: "british_female"
+                    for (text in call.argument<List<String>>("texts") ?: emptyList()) output.prerender(text, voice)
+                    result.success(null)
+                }
                 "speak" -> {
+                    output.cacheDirectory = File(context.cacheDir, "speech")
                     output.speak(call.argument<String>("id")!!, call.argument<String>("text")!!,
-                        call.argument<String>("voice") ?: "british_female")
+                        call.argument<String>("voice") ?: "british_female", call.argument<Boolean>("cache") == true)
                     result.success(null)
                 }
                 "stopSpeaking" -> {

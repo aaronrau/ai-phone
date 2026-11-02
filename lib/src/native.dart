@@ -42,8 +42,10 @@ class NativeApi {
 
   Future<void> log(String message) => call('log', {'message': message});
 
-  Future<void> speak(String id, String text, String voice) =>
-      call('speak', {'id': id, 'text': text, 'voice': voice});
+  /// [cache]: a fixed line (greeting, hold line) whose audio is saved and
+  /// replayed instead of rendered each time.
+  Future<void> speak(String id, String text, String voice, {bool cache = false}) =>
+      call('speak', {'id': id, 'text': text, 'voice': voice, if (cache) 'cache': true});
 
   Future<void> stopSpeaking() => call('stopSpeaking');
 
