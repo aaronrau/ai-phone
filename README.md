@@ -449,6 +449,8 @@ computer, cable or root is needed (Android 12 or later).
 
 #### After a reboot
 
+No computer is needed; the app restarts the helper by itself:
+
 1. Unlock the phone once. Until the first unlock Android runs no ordinary
    app at all, so calls ring through.
 2. Within a few minutes the app starts and turns on Wireless debugging. If
@@ -517,7 +519,11 @@ To revoke it, open Wireless debugging → Paired devices →
   (`KeepAliveJob`) brings the app back after a reboot when a launch manager
   drops `BOOT_COMPLETED`.
 
-#### Starting from a computer (fallback)
+#### Starting from a computer (Android 11 or earlier only)
+
+Not needed on Android 12 or later, where the app does all of this on the
+phone. The script is only for older Android versions, which lack the
+Wireless debugging pairing the app uses, and for development:
 
 ```bash
 tool/start_call_audio_helper.sh <android-serial>
