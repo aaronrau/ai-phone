@@ -557,6 +557,9 @@ class ReceptionistRuntime extends ChangeNotifier {
       case 'ui_visible':
         uiVisible = event['visible'] == true;
         if (uiVisible) unawaited(refreshStatus());
+      case 'bridge' || 'helper_setup':
+        // The call-audio helper connected, or its on-phone setup moved on.
+        unawaited(refreshStatus());
       case 'models':
         modelState = event['stage'] == 'ready' ? 'ready' : 'loading ${event['stage']}';
         notifyListeners();

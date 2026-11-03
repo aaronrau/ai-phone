@@ -154,6 +154,7 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
             "permissions" to permissions.associateWith { granted(it) },
             "listening" to (input?.listening == true),
             "callAudioHelper" to callAudio.connected,
+            "helperSetup" to ai.local.receptionist.adb.HelperLauncher.status(context),
             "calls" to CallRegistry.all().map { (id, call) -> CallRegistry.describe(id, call) },
             "callAudio" to CallRegistry.audioState(),
             "callScreeningModeSupported" to context.getSystemService(AudioManager::class.java).isCallScreeningModeSupported,
@@ -507,6 +508,8 @@ class NativeBridge(private val context: Context, messenger: BinaryMessenger) {
                     host.requestPermissions(permissions.filter { !granted(it) }.toTypedArray(), 42)
                     result.success(null)
                 }
+                "helperPair" -> { ai.local.receptionist.adb.HelperLauncher.startPairing(activity ?: context); result.success(null) }
+                "helperStart" -> { ai.local.receptionist.adb.HelperLauncher.ensureRunning(context, force = true); result.success(null) }
                 "requestOverlay" -> {
                     (activity ?: context).startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

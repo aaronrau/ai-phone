@@ -3,8 +3,9 @@
 An on-device AI receptionist for an Android phone. It answers calls and texts
 for you, screens unknown callers, hangs up on scammers, takes messages, answers
 "are you free?" from your calendar, and can place calls for you to book or
-coordinate something. **Everything runs on the phone**: the release app has no
-INTERNET permission, and there is no server or cloud inference.
+coordinate something. **Everything runs on the phone**: there is no server or
+cloud inference. The app's only network use is a connection to the phone's own
+adb over the loopback address, which starts the call-audio helper.
 
 | Layer | Implementation |
 | --- | --- |
@@ -398,6 +399,7 @@ sequenceDiagram
 | `android/.../sms/` | SMS/MMS receive, send, store, notifications, MMS PDU reader |
 | `android/.../engine/` | llama.cpp (decision model, embeddings), Parakeet/VAD and Pocket TTS engines |
 | `android/.../shell/ShellCallAudio.kt` | Call-audio helper (runs as the shell user) |
+| `android/.../adb/` | On-phone helper start: Wireless debugging pairing (SPAKE2), loopback adb client, `HelperLauncher` |
 | `native/` | JNI for llama.cpp and Pocket TTS |
 | `tool/` | Native setup, model provisioning, helper start, Vapi tests, fine-tuning |
 
@@ -419,15 +421,49 @@ apps, so the helper polls a shell-only `ContentProvider` every 40 ms; each
 exchange carries caller audio in and speech out. Because the downlink never
 contains the assistant's own voice, callers can interrupt it (barge-in).
 
-Start the helper once per boot or app update (it also starts the app's
-background service, which some phones do not restart after an update):
+### Starting the helper without a computer
+
+The app starts the helper itself through the phone's own **Wireless
+debugging** (Android 12+). Setup is one-time, on the phone: **Settings → Setup
+and permissions → Call audio helper → Set up** opens Wireless debugging; turn it
+on with **Always allow on this network**, tap **Pair device with pairing code**
+and type the code into the app's notification. The app then:
+
+1. pairs with the SPAKE2 pairing protocol (`adb/Spake2.kt`, `adb/AdbClient.kt`)
+   and keeps its adb key in app-private storage (`noBackupFilesDir/adb`);
+2. connects to its own adbd on `127.0.0.1` (port found over mDNS), grants itself
+   `WRITE_SECURE_SETTINGS`, keeps **USB debugging** on and turns off the 7-day
+   adb authorization timeout;
+3. starts `ShellCallAudio` as the shell user, then turns Wireless debugging off.
+
+After a reboot, update or helper crash, `HelperLauncher` turns Wireless
+debugging on (only on an allowed Wi-Fi), restarts the helper from the current
+APK and turns it off again; a helper serving a call is never restarted. The
+helper lives in adbd's process group, so it survives Wi-Fi changes while USB
+debugging keeps adbd running; if adbd stops completely, the helper stops too.
+
+Limits, measured on a nubia phone (Android 16):
+
+* After a reboot the phone must be unlocked once before any app can run.
+* Starting needs Wi-Fi: Android will not turn Wireless debugging on over
+  cellular. Once running, the helper keeps working with Wi-Fi off; without
+  Wi-Fi at boot, calls ring through until Wi-Fi connects.
+* "Always allow on this network" is per access point (BSSID), and this phone
+  forgets it on every reboot, so Android asks once after each reboot: tap
+  **Allow**. The app waits up to two minutes for it.
+* Launch managers drop BOOT_COMPLETED (nubia: Battery → Apps AI-control → AI
+  Phone → Auto-start **Allowed** still blocked it), so a persisted JobScheduler
+  job (`KeepAliveJob`) restarts the service and helper a few minutes after
+  unlock. Some phones also do not restart an app after an update until it is
+  opened.
+
+A computer can still start the helper over USB:
 
 ```bash
 tool/start_call_audio_helper.sh <android-serial>
 ```
 
-Without it, calls ring through to you. Shizuku or root could start the helper
-without a computer; that is not implemented.
+Without the helper, calls ring through to you.
 
 Some phones (seen on Samsung) confine an app with nothing on screen to a few
 efficiency cores, where speech renders at under half real time and callers
@@ -482,7 +518,6 @@ adb -s <android-serial> install -r build/app/outputs/flutter-apk/app-debug.apk
 python3 -B tool/provision_models.py --device <android-serial> --audio <audio-models> \
     --stt parakeet-0.6b=<parakeet-dir> --decision <receptionist-decision-v2-350m-q8_0.gguf> \
     --embedding <bge-small-en-v1.5-q8_0.gguf>
-tool/start_call_audio_helper.sh <android-serial>
 ```
 
 `--audio` points at a folder with `vad/silero_vad.onnx` and `pocket/`. Models
@@ -541,8 +576,8 @@ flutter test
 
 ## Limitations
 
-* The call-audio helper must be started from a computer after each reboot or
-  app update.
+* The call-audio helper needs Developer options, a one-time Wireless
+  debugging pairing, and an allowed Wi-Fi network to start after a reboot.
 * Sending pictures and group texts is not supported; RCS chats need Google
   Messages.
 * Silencing the phone's own call output relies on the call-audio helper; if it

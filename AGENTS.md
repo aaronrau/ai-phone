@@ -2,11 +2,13 @@
 
 ## On-device only
 
-The app must work with no internet or server connection. Never add the
-INTERNET permission to the main or release manifest (the Flutter debug
-manifest keeps it only for tooling), and never add remote inference, telemetry
-or a network dependency to the call, SMS or agent paths. Downloads happen only
-on the computer, in `tool/` scripts, at build or provisioning time.
+The app must work with no internet or server connection. The INTERNET
+permission exists for one purpose only: `adb/AdbClient.kt` connects to the
+phone's own adbd on the loopback address to start the call-audio helper. No
+other code may open a socket or reach any other host; never add remote
+inference, telemetry or a network dependency to the call, SMS or agent paths.
+Downloads happen only on the computer, in `tool/` scripts, at build or
+provisioning time.
 
 ## Privacy and pre-push gate
 
@@ -70,6 +72,10 @@ expected `versionCode`.
 - Never silence an allowed call unless the receptionist can actually converse
   (helper connected); otherwise let it ring.
 - Restart the helper after every app reinstall: it runs code from the APK path.
+  `HelperLauncher` does this on the phone (paired Wireless debugging); the
+  helper start command must not match its own shell in `pkill`/`pgrep`.
+- The app's adb key grants a shell on the phone: keep it in app-private
+  storage, never log or export it, and only ever connect to the loopback address.
 
 ## Physical validation
 

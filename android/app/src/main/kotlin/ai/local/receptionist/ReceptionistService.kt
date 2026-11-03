@@ -98,6 +98,9 @@ class ReceptionistService : Service() {
         // Back to the status notification: drop any call notification this service held.
         if (intent?.action == ACTION_IDLE) getSystemService(NotificationManager::class.java).cancel(CallNotifications.ID)
         if (callMode) acquireWakeLock() else releaseWakeLock()
+        // Boot, app update or a plain start: make sure the call-audio helper runs from this APK.
+        if (!callMode) ai.local.receptionist.adb.HelperLauncher.ensureRunning(this)
+        KeepAliveJob.schedule(this)
         EngineHolder.bridge.emit(mapOf("type" to "service", "callMode" to callMode))
         return START_STICKY
     }

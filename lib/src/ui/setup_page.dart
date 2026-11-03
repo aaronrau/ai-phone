@@ -68,14 +68,7 @@ class SetupPage extends StatelessWidget {
                     action: 'Set',
                     onPressed: () => runtime.api.call('requestRole', {'role': 'screening'}),
                   ),
-                  _SetupRow(
-                    label: 'Call audio helper',
-                    done: status['callAudioHelper'] == true,
-                    detail: 'Hears the caller and speaks into the call. Start it from a computer with '
-                        'tool/start_call_audio_helper.sh, again after a reboot or app update.',
-                    action: 'Check',
-                    onPressed: runtime.refreshStatus,
-                  ),
+                  _helperRow(context, status),
                   _SetupRow(
                     label: 'Run in background',
                     done: status['batteryExempt'] == true,
@@ -97,6 +90,71 @@ class SetupPage extends StatelessWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+extension on SetupPage {
+  /// The call-audio helper: set up once on the phone, then started automatically.
+  Widget _helperRow(BuildContext context, Map<String, dynamic> status) {
+    final setup = (status['helperSetup'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final message = setup['message']?.toString();
+    final paired = setup['paired'] == true;
+    final busy = setup['busy'] == true;
+    final String detail;
+    if (setup['supported'] == false) {
+      detail = 'Hears the caller and speaks into the call. On this Android version it must be started from a '
+          'computer with tool/start_call_audio_helper.sh.';
+    } else if (paired) {
+      detail = busy ? 'Starting…' : 'Hears the caller and speaks into the call. ${message ?? 'Not running.'}';
+    } else {
+      detail = 'Hears the caller and speaks into the call. One-time setup on this phone with Wireless debugging; '
+          'after that the app starts it by itself, also after a reboot or update.';
+    }
+    return _SetupRow(
+      label: 'Call audio helper',
+      done: status['callAudioHelper'] == true,
+      detail: detail,
+      action: paired ? 'Start' : 'Set up',
+      onPressed: busy
+          ? null
+          : paired
+              ? () => runtime.api.call('helperStart')
+              : () => _showHelperSetup(context, setup),
+    );
+  }
+
+  Future<void> _showHelperSetup(BuildContext context, Map<String, dynamic> setup) {
+    final developer = setup['developerOptions'] == true;
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Set up the call audio helper'),
+        content: SingleChildScrollView(
+          child: Text([
+            if (!developer)
+              '1. Turn on Developer options: Settings → About phone → tap "Build number" seven times.',
+            '${developer ? 1 : 2}. Tap Continue. In Developer options, open Wireless debugging and turn it on. '
+                'Tick "Always allow on this network" so the app can restart the helper after a reboot.',
+            '${developer ? 2 : 3}. Tap "Pair device with pairing code". Pull down the notification from this app '
+                'and type the six-digit code into it.',
+            'Some phones (nubia, Xiaomi, Oppo and others) block apps at startup: also allow Auto-start for AI Phone '
+                'in the phone\'s battery or app-launch settings, or the helper cannot restart after a reboot.',
+            'The app keeps USB debugging on so the helper survives Wi-Fi changes, and turns Wireless debugging '
+                'on only while it starts the helper. Nothing leaves the phone.',
+          ].join('\n\n')),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              runtime.api.call('helperPair');
+            },
+            child: const Text('Continue'),
+          ),
+        ],
       ),
     );
   }
@@ -186,7 +244,7 @@ class _SetupRow extends StatelessWidget {
   final bool done;
   final String detail;
   final String action;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
