@@ -421,49 +421,120 @@ apps, so the helper polls a shell-only `ContentProvider` every 40 ms; each
 exchange carries caller audio in and speech out. Because the downlink never
 contains the assistant's own voice, callers can interrupt it (barge-in).
 
-### Starting the helper without a computer
+### The call audio helper: setup and everyday use
 
-The app starts the helper itself through the phone's own **Wireless
-debugging** (Android 12+). Setup is one-time, on the phone: **Settings → Setup
-and permissions → Call audio helper → Set up** opens Wireless debugging; turn it
-on with **Always allow on this network**, tap **Pair device with pairing code**
-and type the code into the app's notification. The app then:
+Without the helper the assistant cannot hear or speak on calls, so calls ring
+through to you; texts work either way. The helper only exists because Android
+reserves call audio for the shell user. It always runs **on the phone**; the
+app starts it by itself through the phone's own Wireless debugging. No
+computer, cable or root is needed (Android 12 or later).
 
-1. pairs with the SPAKE2 pairing protocol (`adb/Spake2.kt`, `adb/AdbClient.kt`)
-   and keeps its adb key in app-private storage (`noBackupFilesDir/adb`);
-2. connects to its own adbd on `127.0.0.1` (port found over mDNS), grants itself
-   `WRITE_SECURE_SETTINGS`, keeps **USB debugging** on and turns off the 7-day
-   adb authorization timeout;
-3. starts `ShellCallAudio` as the shell user, then turns Wireless debugging off.
+#### One-time setup (about two minutes, on the phone)
 
-After a reboot, update or helper crash, `HelperLauncher` turns Wireless
-debugging on (only on an allowed Wi-Fi), restarts the helper from the current
-APK and turns it off again; a helper serving a call is never restarted. The
-helper lives in adbd's process group, so it survives Wi-Fi changes while USB
-debugging keeps adbd running; if adbd stops completely, the helper stops too.
+1. Turn on **Developer options**: Settings → About phone → tap **Build
+   number** seven times.
+2. In the app: **Settings → Setup and permissions → Call audio helper → Set
+   up → Continue**. Wireless debugging opens.
+3. Turn **Use wireless debugging** on. When asked, tick **Always allow on
+   this network** and tap **Allow**.
+4. Tap **Pair device with pairing code**. Leave the code on screen, pull down
+   the notification shade, tap **Enter pairing code** on the AI Phone
+   notification and type the six digits.
+5. The notification changes to "Call audio helper running", and Setup shows
+   the helper as **Done**.
+6. Phones with a launch manager (nubia, Xiaomi, Oppo, vivo, Huawei and
+   others) also need the app allowed to start by itself. On nubia: Settings →
+   Battery → **Apps AI-control** → **AI Phone** → set **Auto-start** and
+   **Secondary launch** to **Allowed**.
 
-Limits, measured on a nubia phone (Android 16):
+#### After a reboot
 
-* After a reboot the phone must be unlocked once before any app can run.
-* Starting needs Wi-Fi: Android will not turn Wireless debugging on over
-  cellular. Once running, the helper keeps working with Wi-Fi off; without
-  Wi-Fi at boot, calls ring through until Wi-Fi connects.
-* "Always allow on this network" is per access point (BSSID), and this phone
-  forgets it on every reboot, so Android asks once after each reboot: tap
-  **Allow**. The app waits up to two minutes for it.
-* Launch managers drop BOOT_COMPLETED (nubia: Battery → Apps AI-control → AI
-  Phone → Auto-start **Allowed** still blocked it), so a persisted JobScheduler
-  job (`KeepAliveJob`) restarts the service and helper a few minutes after
-  unlock. Some phones also do not restart an app after an update until it is
-  opened.
+1. Unlock the phone once. Until the first unlock Android runs no ordinary
+   app at all, so calls ring through.
+2. Within a few minutes the app starts and turns on Wireless debugging. If
+   Android shows **Always allow on this network**, tick it and tap **Allow**.
+   The app waits up to two minutes for this; otherwise it tries again later
+   (after 2, 4, 8 … up to 30 minutes) or when you tap **Start** in Setup.
+3. The helper starts and Wireless debugging turns itself off again.
 
-A computer can still start the helper over USB:
+After an app update the app restarts the helper from the new version. Some
+phones (seen on nubia) do not restart an app after an update, so open it once.
+The app never restarts a helper while a call is in progress.
+
+#### Wi-Fi and cellular
+
+| Situation | What happens |
+| --- | --- |
+| Helper running, Wi-Fi off or on cellular | Keeps working. Calls are answered normally. |
+| Phone starts up with no Wi-Fi | The helper cannot start (Android allows Wireless debugging only on Wi-Fi). Calls ring through; the helper starts as soon as Wi-Fi connects. |
+| Phone joins a Wi-Fi access point it has not allowed | Android asks **Always allow on this network** when the helper next starts. |
+
+Android remembers "Always allow" per access point (BSSID), so dual-band and
+mesh networks ask once per access point. The tested nubia phone forgot these
+approvals on every reboot, so expect the prompt after most reboots.
+
+#### What the app changes on the phone
+
+| Setting | Why |
+| --- | --- |
+| Grants itself `WRITE_SECURE_SETTINGS` (once, through adb) | To turn Wireless debugging on and off. |
+| Keeps **USB debugging** on | The helper lives inside adb's process; USB debugging keeps adb running when Wi-Fi drops or Wireless debugging is off. If adb stops completely, the helper stops too. |
+| Turns off the 7-day adb authorization timeout | So the pairing never expires on a phone that rarely reboots. |
+| Turns Wireless debugging on only while starting the helper | adb is not left listening on the Wi-Fi network. |
+
+The app's adb key is like a computer's `adbkey`: it can open a shell on this
+phone. It stays in app-private storage (`noBackupFilesDir/adb`), is never
+backed up or logged, and the app only ever connects to `127.0.0.1` / `::1`.
+To revoke it, open Wireless debugging → Paired devices →
+**receptionist@aiphone** → Forget, then set the helper up again.
+
+#### Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Setup says "Not running" after a reboot | Check for the **Always allow on this network** prompt, or tap **Start** in Setup while on Wi-Fi. |
+| "No pairing code is showing" | Keep the **Pair device with pairing code** dialog open while typing the code into the notification. |
+| "That code did not work" | The code changes every time the dialog opens; type the one currently shown. |
+| "Wireless debugging refused this app" | The pairing was removed. Run **Set up** again. |
+| Nothing happens after a reboot on nubia/Xiaomi-type phones | Allow Auto-start for AI Phone (step 6 of the setup). |
+| Android 11 or earlier | Use the computer script below. |
+
+#### How it works
+
+* **Pairing** (`adb/Spake2.kt`, `adb/AdbClient.kt`): TLS 1.3 to the pairing
+  port, SPAKE2 over edwards25519 byte-compatible with BoringSSL (the M/N points
+  are pinned in `AdbPairingTest`), then the app's RSA public key in adb's
+  format, sealed with AES-128-GCM.
+* **Connecting**: the adb `CNXN`/`STLS` handshake on adbd's TLS port, found
+  over mDNS (`_adb-tls-connect._tcp`), then `shell:` commands as the shell user.
+  Right after Wireless debugging turns on, mDNS can return a stale port, so the
+  app retries for 30 seconds.
+* **Starting** (`adb/HelperLauncher.kt`): replaces any old helper, starts
+  `ShellCallAudio` from the current APK with `setsid nohup app_process`, waits
+  until it has detached and connected, then turns Wireless debugging off.
+* **Staying up**: the service calls `ensureRunning` on every start; a
+  two-minute watchdog restarts a helper that died; a persisted JobScheduler job
+  (`KeepAliveJob`) brings the app back after a reboot when a launch manager
+  drops `BOOT_COMPLETED`.
+
+#### Starting from a computer (fallback)
 
 ```bash
 tool/start_call_audio_helper.sh <android-serial>
 ```
 
-Without the helper, calls ring through to you.
+#### Measured on a nubia NX809J (Android 16)
+
+* Setup through the app paired and started the helper.
+* After an update the helper restarted from the new APK in 3–7 s; with
+  Wireless debugging and Wi-Fi off it kept running.
+* After a reboot and unlock: the app started, Android asked for the access
+  point once, and the helper was running 12 s later, including the tap.
+* On two earlier reboots nubia's launch manager dropped `BOOT_COMPLETED`
+  ("autolaunch policy") until Auto-start was allowed; `KeepAliveJob` was
+  blocked during early boot and allowed once the policy loaded.
+* A Vapi test call on the app-started helper: STT 89–419 ms, decision
+  0–297 ms, TTS first frame 0–77 ms.
 
 Some phones (seen on Samsung) confine an app with nothing on screen to a few
 efficiency cores, where speech renders at under half real time and callers
@@ -576,8 +647,10 @@ flutter test
 
 ## Limitations
 
-* The call-audio helper needs Developer options, a one-time Wireless
-  debugging pairing, and an allowed Wi-Fi network to start after a reboot.
+* The call-audio helper needs Developer options and a one-time Wireless
+  debugging pairing. After a reboot it needs the phone unlocked once and Wi-Fi,
+  and often one tap on "Always allow on this network" (see
+  [The call audio helper](#the-call-audio-helper-setup-and-everyday-use)).
 * Sending pictures and group texts is not supported; RCS chats need Google
   Messages.
 * Silencing the phone's own call output relies on the call-audio helper; if it
